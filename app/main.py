@@ -1,0 +1,37 @@
+import os
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.database import init_db
+from app.routers import auth, habits, logs, stats
+
+app = FastAPI(title="Rutina API", version="1.0.0")
+
+# Comma-separated list of allowed origins, e.g. "https://mi-app.vercel.app,http://localhost:5173"
+raw_origins = os.getenv("ALLOWED_ORIGINS", "*")
+allow_origins = [o.strip() for o in raw_origins.split(",")] if raw_origins != "*" else ["*"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allow_origins,
+    allow_credentials=allow_origins != ["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.on_event("startup")
+def on_startup():
+    init_db()
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+app.include_router(auth.router)
+app.include_router(habits.router)
+app.include_router(logs.router)
+app.include_router(stats.router)
