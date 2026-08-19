@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Rutina — seguimiento de hábitos
 
 App de seguimiento de hábitos con horarios: te dice qué deberías estar
@@ -142,3 +143,7 @@ página.
 
 Todas las rutas salvo `/auth/register` y `/auth/login` requieren el header
 `Authorization: Bearer <token>`.
+=======
+# habit_tracker_system
+App to build habits and take decision based on data
+>>>>>>> d504a73d7f31b5c0870e42751c30f63f6f3aeea3
