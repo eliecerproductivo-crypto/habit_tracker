@@ -14,16 +14,10 @@ function saveAdvanceMinutes(m) {
   localStorage.setItem(STORAGE_KEY, String(m));
 }
 
-/**
- * Checks if the Notification API is available and permission is granted.
- */
 function canNotify() {
   return "Notification" in window && Notification.permission === "granted";
 }
 
-/**
- * Fires a browser notification for a habit.
- */
 function fireNotification(habit, minutesLeft) {
   if (!canNotify()) return;
   const body =
@@ -38,7 +32,7 @@ export function useNotifications(habits) {
     "Notification" in window ? Notification.permission : "unsupported"
   );
   const [advanceMinutes, setAdvanceMinutesState] = useState(getAdvanceMinutes);
-  // Track which habit+day combos have already been notified to avoid repeats
+  // Key: "habitId-YYYY-MM-DD-startTime" — unique per habit per day per start time
   const notifiedRef = useRef(new Set());
 
   const requestPermission = useCallback(async () => {
@@ -51,7 +45,6 @@ export function useNotifications(habits) {
     const value = Math.max(1, Math.min(120, Number(m)));
     saveAdvanceMinutes(value);
     setAdvanceMinutesState(value);
-    // Reset fired notifications so the new timing takes effect today
     notifiedRef.current.clear();
   }, []);
 
@@ -61,8 +54,10 @@ export function useNotifications(habits) {
     const check = () => {
       const now = new Date();
       const day = now.getDay();
+      // Use total minutes from midnight for comparison
       const nowMinutes = now.getHours() * 60 + now.getMinutes();
-      const todayKey = now.toDateString();
+      // Date string for daily reset of notifications
+      const dateKey = now.toISOString().slice(0, 10);
 
       habits.forEach((habit) => {
         if (habit.is_active === false) return;
@@ -72,19 +67,35 @@ export function useNotifications(habits) {
         if (start == null) return;
 
         const minutesLeft = start - nowMinutes;
-        const key = `${habit.id}-${todayKey}-${advanceMinutes}`;
 
-        // Fire when we're within the advance window (±1 min tolerance)
-        if (minutesLeft > 0 && minutesLeft <= advanceMinutes && !notifiedRef.current.has(key)) {
-          notifiedRef.current.add(key);
-          fireNotification(habit, minutesLeft);
+        // Fire when inside the notification window.
+        // Window: from advanceMinutes down to 0 (we allow up to advanceMinutes+1
+        // so a 60s tick never misses the window).
+        if (minutesLeft >= 0 && minutesLeft <= advanceMinutes) {
+          // Key includes start_time so each habit fires once per day regardless
+          // of how many habits share the same day.
+          const key = `${habit.id}-${dateKey}-${habit.start_time}`;
+          if (!notifiedRef.current.has(key)) {
+            notifiedRef.current.add(key);
+            fireNotification(habit, minutesLeft);
+          }
         }
       });
     };
 
-    check(); // run immediately in case we're already in the window
-    const id = setInterval(check, 60_000); // then every minute
-    return () => clearInterval(id);
+    check();
+    const id = setInterval(check, 60_000);
+
+    // Also re-check when the tab becomes visible again (mobile browser wakeup)
+    const onVisible = () => {
+      if (document.visibilityState === "visible") check();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [habits, advanceMinutes]);
 
   return { permission, advanceMinutes, requestPermission, setAdvanceMinutes };
