@@ -11,6 +11,13 @@ from sqlalchemy.pool import NullPool
 #   postgresql://postgres.xxxx:PASSWORD@aws-0-region.pooler.supabase.com:6543/postgres
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./habit_tracker.db")
 
+# SQLAlchemy necesita el prefijo "postgresql+psycopg" para usar psycopg v3.
+# Si la URL viene como "postgresql://" (ej: desde Supabase), la convertimos.
+if DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
+elif DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
+
 connect_args = {}
 engine_kwargs = {"pool_pre_ping": True}
 
