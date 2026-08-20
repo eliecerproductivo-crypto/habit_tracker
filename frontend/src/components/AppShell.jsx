@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { NavLink } from "react-router-dom";
-import { LayoutGrid, ListChecks, BarChart3, LogOut, CheckCircle2 } from "lucide-react";
+import { LayoutGrid, ListChecks, BarChart3, LogOut, CheckCircle2, UserRound } from "lucide-react";
 import ThemeToggle from "./ThemeToggle";
 import NotificationToggle from "./NotificationToggle";
+import AccountModal from "./AccountModal";
 import { useAuth } from "../context/AuthContext";
 import { useHabits } from "../hooks/useHabits";
 import { useNotifications } from "../hooks/useNotifications";
@@ -37,6 +39,7 @@ export default function AppShell({ children }) {
   const { habits } = useHabits();
   const { permission, advanceMinutes, requestPermission, setAdvanceMinutes } =
     useNotifications(habits);
+  const [accountOpen, setAccountOpen] = useState(false);
 
   return (
     <div className="min-h-dvh bg-bg text-ink">
@@ -59,13 +62,19 @@ export default function AppShell({ children }) {
           </nav>
 
           <div className="mt-auto flex items-center gap-2 border-t border-line pt-4">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-violet-soft font-mono text-xs font-semibold text-violet">
-              {(user?.name || user?.email || "?").slice(0, 1).toUpperCase()}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">{user?.name || "Cuenta"}</p>
-              <p className="truncate text-xs text-ink-faint">{user?.email}</p>
-            </div>
+            <button
+              onClick={() => setAccountOpen(true)}
+              title="Configuración de la cuenta"
+              className="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1 text-left transition-colors hover:bg-panel-alt cursor-pointer"
+            >
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-violet-soft font-mono text-xs font-semibold text-violet">
+                {(user?.name || user?.email || "?").slice(0, 1).toUpperCase()}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium">{user?.name || "Cuenta"}</p>
+                <p className="truncate text-xs text-ink-faint">{user?.email}</p>
+              </div>
+            </button>
             <button
               onClick={logout}
               aria-label="Cerrar sesión"
@@ -88,6 +97,14 @@ export default function AppShell({ children }) {
               <span className="font-mono text-sm font-semibold">rutina</span>
             </div>
             <div className="flex items-center gap-2">
+              <button
+                onClick={() => setAccountOpen(true)}
+                aria-label="Cuenta"
+                title="Cuenta"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-panel-alt hover:text-ink cursor-pointer md:hidden"
+              >
+                <UserRound size={17} />
+              </button>
               <NotificationToggle
                 permission={permission}
                 advanceMinutes={advanceMinutes}
@@ -123,6 +140,8 @@ export default function AppShell({ children }) {
           </nav>
         </div>
       </div>
+
+      <AccountModal open={accountOpen} onClose={() => setAccountOpen(false)} />
     </div>
   );
 }

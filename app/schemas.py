@@ -111,3 +111,11 @@ class WeeklyStat(BaseModel):
 class CategoryStat(BaseModel):
     category: str
     completed_count: int
+
+class UserUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    email: EmailStr
+
+class PasswordChange(BaseModel):
+    current_password: str = Field(min_length=1)
+    new_password: str = Field(min_length=6, max_length=200)

@@ -49,8 +49,28 @@ export function AuthProvider({ children }) {
     setUser(null);
   };
 
+  const updateProfile = async (name, email) => {
+    const res = await api.put("/auth/me", { name, email });
+    setUser(res.data);
+    return res.data;
+  };
+
+  const changePassword = async (currentPassword, newPassword) => {
+    await api.put("/auth/me/password", {
+      current_password: currentPassword,
+      new_password: newPassword,
+    });
+  };
+
+  const deleteAccount = async () => {
+    await api.delete("/auth/me");
+    logout();
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider
+      value={{ user, loading, login, register, logout, updateProfile, changePassword, deleteAccount }}
+    >
       {children}
     </AuthContext.Provider>
   );
