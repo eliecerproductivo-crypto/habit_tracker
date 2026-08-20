@@ -5,11 +5,8 @@ import { createPortal } from "react-dom";
 export default function Modal({ open, onClose, title, children }) {
   const dialogRef = useRef(null);
 
-  // Blur active element before closing so Android keyboard dismisses
-  // before the modal unmounts — prevents the dvh viewport jump blank-screen bug
   const handleClose = useCallback(() => {
-    document.activeElement?.blur();
-    setTimeout(onClose, 100);
+    onClose();
   }, [onClose]);
 
   useEffect(() => {
@@ -18,7 +15,6 @@ export default function Modal({ open, onClose, title, children }) {
       if (e.key === "Escape") handleClose();
     };
     document.addEventListener("keydown", onKey);
-    // Only focus the dialog container on first open, not on every re-render
     const timeout = setTimeout(() => dialogRef.current?.focus(), 0);
     return () => {
       document.removeEventListener("keydown", onKey);
