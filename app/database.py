@@ -18,6 +18,13 @@ if DATABASE_URL.startswith("postgresql://"):
 elif DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
 
+# psycopg v3 no acepta "pgbouncer=true" como query param — lo quitamos.
+if "pgbouncer" in DATABASE_URL:
+    from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
+    parsed = urlparse(DATABASE_URL)
+    params = {k: v for k, v in parse_qs(parsed.query).items() if k != "pgbouncer"}
+    DATABASE_URL = urlunparse(parsed._replace(query=urlencode(params, doseq=True)))
+
 connect_args = {}
 engine_kwargs = {"pool_pre_ping": True}
 
