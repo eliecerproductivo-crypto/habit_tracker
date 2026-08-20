@@ -18,13 +18,49 @@ function canNotify() {
   return "Notification" in window && Notification.permission === "granted";
 }
 
-function fireNotification(habit, minutesLeft) {
+// Register SW once and cache the registration promise
+let swRegistrationPromise = null;
+
+function getSwRegistration() {
+  if (!("serviceWorker" in navigator)) return Promise.resolve(null);
+  if (!swRegistrationPromise) {
+    swRegistrationPromise = navigator.serviceWorker
+      .register("/sw.js")
+      .catch((err) => {
+        console.warn("SW registration failed:", err);
+        return null;
+      });
+  }
+  return swRegistrationPromise;
+}
+
+async function fireNotification(habit, minutesLeft) {
   if (!canNotify()) return;
+
+  const title = `⏰ ${habit.name}`;
   const body =
     minutesLeft <= 1
       ? "¡Empieza ahora!"
       : `Comienza en ${minutesLeft} minuto${minutesLeft !== 1 ? "s" : ""}`;
-  new Notification(`⏰ ${habit.name}`, { body, icon: "/favicon.svg" });
+  const options = { body, icon: "/favicon.svg", badge: "/favicon.svg" };
+
+  try {
+    const reg = await getSwRegistration();
+    if (reg) {
+      // Mobile path — required on Android Chrome
+      await reg.showNotification(title, options);
+    } else {
+      // Desktop fallback
+      new Notification(title, options);
+    }
+  } catch (err) {
+    // Last resort fallback for desktop browsers without SW
+    try {
+      new Notification(title, options);
+    } catch {
+      console.warn("Notification failed:", err);
+    }
+  }
 }
 
 export function useNotifications(habits) {
@@ -32,13 +68,14 @@ export function useNotifications(habits) {
     "Notification" in window ? Notification.permission : "unsupported"
   );
   const [advanceMinutes, setAdvanceMinutesState] = useState(getAdvanceMinutes);
-  // Key: "habitId-YYYY-MM-DD-startTime" — unique per habit per day per start time
   const notifiedRef = useRef(new Set());
 
   const requestPermission = useCallback(async () => {
     if (!("Notification" in window)) return;
     const result = await Notification.requestPermission();
     setPermission(result);
+    // Pre-register SW as soon as permission is granted
+    if (result === "granted") getSwRegistration();
   }, []);
 
   const setAdvanceMinutes = useCallback((m) => {
@@ -54,9 +91,7 @@ export function useNotifications(habits) {
     const check = () => {
       const now = new Date();
       const day = now.getDay();
-      // Use total minutes from midnight for comparison
       const nowMinutes = now.getHours() * 60 + now.getMinutes();
-      // Date string for daily reset of notifications
       const dateKey = now.toISOString().slice(0, 10);
 
       habits.forEach((habit) => {
@@ -67,13 +102,7 @@ export function useNotifications(habits) {
         if (start == null) return;
 
         const minutesLeft = start - nowMinutes;
-
-        // Fire when inside the notification window.
-        // Window: from advanceMinutes down to 0 (we allow up to advanceMinutes+1
-        // so a 60s tick never misses the window).
         if (minutesLeft >= 0 && minutesLeft <= advanceMinutes) {
-          // Key includes start_time so each habit fires once per day regardless
-          // of how many habits share the same day.
           const key = `${habit.id}-${dateKey}-${habit.start_time}`;
           if (!notifiedRef.current.has(key)) {
             notifiedRef.current.add(key);
@@ -86,7 +115,6 @@ export function useNotifications(habits) {
     check();
     const id = setInterval(check, 60_000);
 
-    // Also re-check when the tab becomes visible again (mobile browser wakeup)
     const onVisible = () => {
       if (document.visibilityState === "visible") check();
     };
