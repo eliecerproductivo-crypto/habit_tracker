@@ -39,7 +39,7 @@ export default function AppShell({ children }) {
     useNotifications(habits);
 
   return (
-    <div className="min-h-screen bg-bg text-ink">
+    <div className="min-h-dvh bg-bg text-ink">
       <div className="mx-auto flex max-w-7xl">
         {/* Sidebar (desktop) */}
         <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-line px-4 py-6 md:flex">
@@ -78,7 +78,7 @@ export default function AppShell({ children }) {
         </aside>
 
         {/* Main column */}
-        <div className="flex min-h-screen flex-1 flex-col">
+        <div className="flex min-h-dvh flex-1 flex-col">
           {/* Topbar */}
           <header className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-bg/80 px-5 py-3 backdrop-blur md:justify-end">
             <div className="flex items-center gap-2 md:hidden">
