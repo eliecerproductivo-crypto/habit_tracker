@@ -2,13 +2,13 @@ import { useCallback, useEffect, useState } from "react";
 import api from "../api/client";
 import { todayLocalISODate } from "../lib/schedule";
 
-export function useHabits() {
+export function useHabits(date) {
   const [habits, setHabits] = useState([]);
-  const [logs, setLogs] = useState([]); // today's logs
+  const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const today = todayLocalISODate();
+  const targetDate = date || todayLocalISODate();
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -16,7 +16,7 @@ export function useHabits() {
     try {
       const [habitsRes, logsRes] = await Promise.all([
         api.get("/habits"),
-        api.get("/logs", { params: { date: today } }),
+        api.get("/logs", { params: { date: targetDate } }),
       ]);
       setHabits(habitsRes.data);
       setLogs(logsRes.data);
@@ -25,7 +25,7 @@ export function useHabits() {
     } finally {
       setLoading(false);
     }
-  }, [today]);
+  }, [targetDate]);
 
   useEffect(() => {
     refresh();
@@ -52,10 +52,10 @@ export function useHabits() {
     setHabits((h) => h.filter((x) => x.id !== id));
   };
 
-  const toggleToday = async (habitId, completed) => {
+  const toggleForDate = async (habitId, completed) => {
     const res = await api.post("/logs", {
       habit_id: habitId,
-      date: today,
+      date: targetDate,
       completed,
     });
     setLogs((prev) => {
@@ -74,7 +74,7 @@ export function useHabits() {
     createHabit,
     updateHabit,
     deleteHabit,
-    toggleToday,
-    today,
+    toggleToday: toggleForDate,
+    date: targetDate,
   };
 }

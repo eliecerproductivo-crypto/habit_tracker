@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { Trash2 } from "lucide-react";
+import { Trash2, LogOut } from "lucide-react";
 import Modal from "./Modal";
 import ConfirmDialog from "./ConfirmDialog";
 import { useAuth } from "../context/AuthContext";
 
 export default function AccountModal({ open, onClose }) {
-  const { user, updateProfile, changePassword, deleteAccount } = useAuth();
+  const { user, logout, updateProfile, changePassword, deleteAccount } = useAuth();
 
   const [name, setName] = useState(user?.name || "");
   const [email, setEmail] = useState(user?.email || "");
@@ -90,6 +90,25 @@ export default function AccountModal({ open, onClose }) {
     <>
       <Modal open={open} onClose={handleClose} title="Tu cuenta">
         <div className="flex flex-col gap-6">
+
+          {/* Usuario + logout */}
+          <div className="flex items-center gap-3 rounded-xl bg-panel-alt px-4 py-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-violet-soft font-mono text-sm font-semibold text-violet">
+              {(user?.name || user?.email || "?").slice(0, 1).toUpperCase()}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold">{user?.name || "Cuenta"}</p>
+              <p className="truncate text-xs text-ink-faint">{user?.email}</p>
+            </div>
+            <button
+              onClick={() => { handleClose(); logout(); }}
+              title="Cerrar sesión"
+              aria-label="Cerrar sesión"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-coral-soft hover:text-coral cursor-pointer"
+            >
+              <LogOut size={16} />
+            </button>
+          </div>
 
           {/* Perfil */}
           <form onSubmit={handleProfileSubmit} className="flex flex-col gap-3">

@@ -11,7 +11,6 @@ export const DAY_LABELS_FULL = [
 ];
 
 export function parseDays(daysOfWeek) {
-  // habit.days_of_week is stored as a comma-separated string, e.g. "1,2,3,4,5"
   if (!daysOfWeek) return [];
   return daysOfWeek
     .split(",")
@@ -36,7 +35,7 @@ export function formatTime(hhmm) {
 
 export function formatDuration(startMinutes, endMinutes) {
   let diff = endMinutes - startMinutes;
-  if (diff < 0) diff += 24 * 60; // crosses midnight
+  if (diff < 0) diff += 24 * 60;
   const h = Math.floor(diff / 60);
   const m = diff % 60;
   if (h === 0) return `${m} min`;
@@ -44,8 +43,6 @@ export function formatDuration(startMinutes, endMinutes) {
   return `${h} h ${m} min`;
 }
 
-// Returns habit's status relative to `now` for a given day-of-week bucket:
-// "active" | "upcoming" | "done" (time has passed) | "not-scheduled"
 export function habitStatusNow(habit, now = new Date()) {
   const day = now.getDay();
   const days = parseDays(habit.days_of_week);
@@ -61,21 +58,16 @@ export function habitStatusNow(habit, now = new Date()) {
     if (nowMinutes < start) return "upcoming";
     return "past";
   }
-  // Crosses midnight (e.g. 21:20 -> 05:00)
   if (nowMinutes >= start || nowMinutes < end) return "active";
   if (nowMinutes < start) return "upcoming";
   return "past";
 }
 
-// Given the full habit list, find what's active right now and what's next.
 export function getCurrentAndNext(habits, now = new Date()) {
   const scheduled = habits.filter((h) => h.is_active !== false);
   const active = scheduled.filter((h) => habitStatusNow(h, now) === "active");
 
-  // If multiple overlap, prefer the one that started most recently.
-  active.sort(
-    (a, b) => toMinutes(b.start_time) - toMinutes(a.start_time)
-  );
+  active.sort((a, b) => toMinutes(b.start_time) - toMinutes(a.start_time));
 
   const upcoming = scheduled
     .filter((h) => habitStatusNow(h, now) === "upcoming")
@@ -87,9 +79,34 @@ export function getCurrentAndNext(habits, now = new Date()) {
   };
 }
 
-export function todayLocalISODate() {
-  const d = new Date();
+export function toLocalISODate(d) {
   const offset = d.getTimezoneOffset();
   const local = new Date(d.getTime() - offset * 60 * 1000);
   return local.toISOString().slice(0, 10);
+}
+
+export function todayLocalISODate() {
+  return toLocalISODate(new Date());
+}
+
+export function addDays(isoDate, delta) {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + delta);
+  return toLocalISODate(dt);
+}
+
+export function weekdayOfISODate(isoDate) {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  return new Date(y, m - 1, d).getDay();
+}
+
+export function formatDateLabel(isoDate) {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  return dt.toLocaleDateString("es", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  });
 }

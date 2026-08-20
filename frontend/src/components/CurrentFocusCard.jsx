@@ -1,22 +1,18 @@
 import { CheckCircle2, Circle, ArrowRight } from "lucide-react";
 import DayRail from "./DayRail";
 import { categoryMeta } from "../lib/categories";
-import { formatTime, getCurrentAndNext } from "../lib/schedule";
+import { formatTime, getCurrentAndNext, formatDateLabel, todayLocalISODate } from "../lib/schedule";
 import { useNow } from "../hooks/useNow";
 
-export default function CurrentFocusCard({ habits, completedHabitIds, onToggle }) {
+export default function CurrentFocusCard({ habits, completedHabitIds, onToggle, date }) {
   const now = useNow();
-  const { current, next } = getCurrentAndNext(habits, now);
+  const isToday = !date || date === todayLocalISODate();
+  const { current, next } = isToday ? getCurrentAndNext(habits, now) : { current: null, next: null };
 
-  const clock = now.toLocaleTimeString("es", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-  const dateLabel = now.toLocaleDateString("es", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-  });
+  const clock = now.toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
+  const dateLabel = isToday
+    ? now.toLocaleDateString("es", { weekday: "long", day: "numeric", month: "long" })
+    : formatDateLabel(date);
 
   const currentDone = current ? completedHabitIds.has(current.id) : false;
   const meta = current ? categoryMeta(current.category) : null;
@@ -32,7 +28,7 @@ export default function CurrentFocusCard({ habits, completedHabitIds, onToggle }
     >
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <p className="text-sm capitalize text-ink-soft">{dateLabel}</p>
-        <p className="font-mono text-sm tabular text-ink-faint">{clock}</p>
+        {isToday && <p className="font-mono text-sm tabular text-ink-faint">{clock}</p>}
       </div>
 
       <div className="mt-4">
@@ -57,22 +53,22 @@ export default function CurrentFocusCard({ habits, completedHabitIds, onToggle }
               onClick={() => onToggle(current.id, !currentDone)}
               className={[
                 "flex shrink-0 items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold transition-colors cursor-pointer",
-                currentDone
-                  ? "bg-mint-soft text-mint"
-                  : "bg-ink text-bg hover:opacity-90",
+                currentDone ? "bg-mint-soft text-mint" : "bg-ink text-bg hover:opacity-90",
               ].join(" ")}
             >
-              {currentDone ? <CheckCircle2 size={18} /> : <Circle size={18} />}
+              {currentDone ? <CheckCircle2 size={18} aria-hidden="true" /> : <Circle size={18} aria-hidden="true" />}
               {currentDone ? "Completado" : "Marcar como hecho"}
             </button>
           </div>
         ) : (
           <div>
             <p className="font-mono text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
-              Sin bloque activo
+              {isToday ? "Sin bloque activo" : "Vista del día"}
             </p>
             <h2 className="mt-1 text-xl font-semibold text-ink-soft md:text-2xl">
-              No tienes un hábito programado en este momento
+              {isToday
+                ? "No tienes un hábito programado en este momento"
+                : "Revisa y marca los hábitos de este día abajo"}
             </h2>
           </div>
         )}
@@ -90,7 +86,13 @@ export default function CurrentFocusCard({ habits, completedHabitIds, onToggle }
       </div>
 
       <div className="mt-6">
-        <DayRail habits={habits} now={now} completedHabitIds={completedHabitIds} />
+        <DayRail
+          habits={habits}
+          now={now}
+          date={date}
+          showNow={isToday}
+          completedHabitIds={completedHabitIds}
+        />
       </div>
     </section>
   );

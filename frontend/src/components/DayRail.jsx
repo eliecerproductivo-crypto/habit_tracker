@@ -1,5 +1,5 @@
 import { categoryMeta } from "../lib/categories";
-import { parseDays, toMinutes, formatTime } from "../lib/schedule";
+import { parseDays, toMinutes, formatTime, weekdayOfISODate } from "../lib/schedule";
 
 const DAY_MIN = 24 * 60;
 const VIEW_START = 5 * 60 + 30;  // 5:30 AM in minutes
@@ -15,7 +15,6 @@ const TICKS = [
   { minutes: VIEW_END,   align: "right" },
 ];
 
-// Short label: "5:30a", "9a", "12p", "3p", "6p", "10p"
 function shortLabel(minutes) {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
@@ -33,14 +32,9 @@ function segmentsFor(habit) {
   const end = toMinutes(habit.end_time);
   if (start == null || end == null) return [];
   if (end > start) return [[start, end]];
-  // crosses midnight: split into two segments
-  return [
-    [start, DAY_MIN],
-    [0, end],
-  ];
+  return [[start, DAY_MIN], [0, end]];
 }
 
-// Clip a segment to the visible range, returns null if fully outside
 function clipSegment(start, end) {
   const clippedStart = Math.max(start, VIEW_START);
   const clippedEnd = Math.min(end, VIEW_END);
@@ -48,11 +42,11 @@ function clipSegment(start, end) {
   return [clippedStart, clippedEnd];
 }
 
-export default function DayRail({ habits, now, completedHabitIds }) {
-  const day = now.getDay();
+export default function DayRail({ habits, now, date, showNow = true, completedHabitIds }) {
+  const day = date ? weekdayOfISODate(date) : now.getDay();
   const nowMinutes = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
   const nowPct = toViewPct(nowMinutes);
-  const nowVisible = nowMinutes >= VIEW_START && nowMinutes <= VIEW_END;
+  const nowVisible = showNow && nowMinutes >= VIEW_START && nowMinutes <= VIEW_END;
 
   const todays = habits.filter(
     (h) => h.is_active !== false && parseDays(h.days_of_week).includes(day)
@@ -86,7 +80,6 @@ export default function DayRail({ habits, now, completedHabitIds }) {
           })
         )}
 
-        {/* Now marker */}
         {nowVisible && (
           <div
             className="absolute -top-1.5 flex -translate-x-1/2 flex-col items-center"
@@ -98,7 +91,6 @@ export default function DayRail({ habits, now, completedHabitIds }) {
         )}
       </div>
 
-      {/* Tick labels */}
       <div className="relative mt-2 h-3 w-full overflow-hidden font-mono text-[10px] text-ink-faint">
         {TICKS.map(({ minutes, align }) => {
           const pct = toViewPct(minutes);

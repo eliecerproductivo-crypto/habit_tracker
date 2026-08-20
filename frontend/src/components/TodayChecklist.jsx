@@ -1,18 +1,18 @@
 import { Check } from "lucide-react";
 import { categoryMeta } from "../lib/categories";
-import { formatTime, parseDays, toMinutes } from "../lib/schedule";
+import { formatTime, parseDays, toMinutes, todayLocalISODate, weekdayOfISODate } from "../lib/schedule";
 
-export default function TodayChecklist({ habits, completedHabitIds, onToggle }) {
-  const today = new Date().getDay();
+export default function TodayChecklist({ habits, completedHabitIds, onToggle, date }) {
+  const weekday = weekdayOfISODate(date || todayLocalISODate());
   const todays = habits
-    .filter((h) => h.is_active !== false && parseDays(h.days_of_week).includes(today))
+    .filter((h) => h.is_active !== false && parseDays(h.days_of_week).includes(weekday))
     .sort((a, b) => toMinutes(a.start_time) - toMinutes(b.start_time));
 
   if (todays.length === 0) {
     return (
       <div className="rounded-2xl border border-dashed border-line px-5 py-10 text-center">
         <p className="text-sm text-ink-soft">
-          No tienes hábitos programados para hoy.
+          No tienes hábitos programados para este día.
         </p>
       </div>
     );
