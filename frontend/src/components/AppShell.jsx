@@ -1,7 +1,10 @@
 import { NavLink } from "react-router-dom";
 import { LayoutGrid, ListChecks, BarChart3, LogOut, CheckCircle2 } from "lucide-react";
 import ThemeToggle from "./ThemeToggle";
+import NotificationToggle from "./NotificationToggle";
 import { useAuth } from "../context/AuthContext";
+import { useHabits } from "../hooks/useHabits";
+import { useNotifications } from "../hooks/useNotifications";
 
 const NAV_ITEMS = [
   { to: "/", label: "Hoy", icon: LayoutGrid, end: true },
@@ -31,6 +34,9 @@ function NavItem({ to, label, icon: Icon, end }) {
 
 export default function AppShell({ children }) {
   const { user, logout } = useAuth();
+  const { habits } = useHabits();
+  const { permission, advanceMinutes, requestPermission, setAdvanceMinutes } =
+    useNotifications(habits);
 
   return (
     <div className="min-h-screen bg-bg text-ink">
@@ -81,7 +87,15 @@ export default function AppShell({ children }) {
               </span>
               <span className="font-mono text-sm font-semibold">rutina</span>
             </div>
-            <ThemeToggle />
+            <div className="flex items-center gap-2">
+              <NotificationToggle
+                permission={permission}
+                advanceMinutes={advanceMinutes}
+                onRequest={requestPermission}
+                onChangeMinutes={setAdvanceMinutes}
+              />
+              <ThemeToggle />
+            </div>
           </header>
 
           <main className="flex-1 px-5 pb-24 pt-4 md:px-8 md:pb-10 md:pt-6">

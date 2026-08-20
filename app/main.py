@@ -1,5 +1,8 @@
 import os
 
+from dotenv import load_dotenv
+load_dotenv()  # carga .env en local; en Vercel las vars ya están en el entorno
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
