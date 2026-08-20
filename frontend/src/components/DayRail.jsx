@@ -6,7 +6,6 @@ const VIEW_START = 5 * 60 + 30;  // 5:30 AM in minutes
 const VIEW_END   = 22 * 60;       // 10:00 PM in minutes
 const VIEW_RANGE = VIEW_END - VIEW_START;
 
-// Ticks incluyen los extremos del rango visible
 const TICKS = [
   { minutes: VIEW_START, align: "left" },
   { minutes: 9 * 60,     align: "center" },
@@ -15,6 +14,15 @@ const TICKS = [
   { minutes: 18 * 60,    align: "center" },
   { minutes: VIEW_END,   align: "right" },
 ];
+
+// Short label: "5:30a", "9a", "12p", "3p", "6p", "10p"
+function shortLabel(minutes) {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  const suffix = h >= 12 ? "p" : "a";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return m === 0 ? `${h12}${suffix}` : `${h12}:${String(m).padStart(2, "0")}${suffix}`;
+}
 
 function toViewPct(minutes) {
   return ((minutes - VIEW_START) / VIEW_RANGE) * 100;
@@ -25,10 +33,19 @@ function segmentsFor(habit) {
   const end = toMinutes(habit.end_time);
   if (start == null || end == null) return [];
   if (end > start) return [[start, end]];
+  // crosses midnight: split into two segments
   return [
     [start, DAY_MIN],
     [0, end],
   ];
+}
+
+// Clip a segment to the visible range, returns null if fully outside
+function clipSegment(start, end) {
+  const clippedStart = Math.max(start, VIEW_START);
+  const clippedEnd = Math.min(end, VIEW_END);
+  if (clippedStart >= clippedEnd) return null;
+  return [clippedStart, clippedEnd];
 }
 
 export default function DayRail({ habits, now, completedHabitIds }) {
@@ -45,11 +62,14 @@ export default function DayRail({ habits, now, completedHabitIds }) {
     <div className="w-full select-none">
       <div className="relative h-3.5 w-full rounded-full bg-panel-alt">
         {todays.map((habit) =>
-          segmentsFor(habit).map(([start, end], i) => {
+          segmentsFor(habit).flatMap(([start, end], i) => {
+            const clipped = clipSegment(start, end);
+            if (!clipped) return [];
+            const [cs, ce] = clipped;
             const meta = categoryMeta(habit.category);
             const done = completedHabitIds.has(habit.id);
-            const left = toViewPct(start);
-            const width = Math.max(((end - start) / VIEW_RANGE) * 100, 0.6);
+            const left = toViewPct(cs);
+            const width = Math.max(((ce - cs) / VIEW_RANGE) * 100, 0.6);
             return (
               <div
                 key={`${habit.id}-${i}`}
@@ -78,11 +98,10 @@ export default function DayRail({ habits, now, completedHabitIds }) {
         )}
       </div>
 
-      {/* Tick labels — cada uno posicionado con el mismo sistema de % que la barra */}
-      <div className="relative mt-2 h-3 w-full font-mono text-[10px] text-ink-faint">
+      {/* Tick labels */}
+      <div className="relative mt-2 h-3 w-full overflow-hidden font-mono text-[10px] text-ink-faint">
         {TICKS.map(({ minutes, align }) => {
           const pct = toViewPct(minutes);
-          const hhmm = `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
           const transform =
             align === "left" ? "none"
             : align === "right" ? "translateX(-100%)"
@@ -93,7 +112,7 @@ export default function DayRail({ habits, now, completedHabitIds }) {
               className="absolute whitespace-nowrap"
               style={{ left: `${pct}%`, transform }}
             >
-              {formatTime(hhmm)}
+              {shortLabel(minutes)}
             </span>
           );
         })}
