@@ -26,11 +26,13 @@ export default function NotificationToggle({
   };
 
   const handleSave = () => {
+    // Dismiss keyboard before closing so the dvh jump happens while modal is still visible
+    document.activeElement?.blur();
     const val = parseInt(inputVal, 10);
     if (Number.isFinite(val) && val > 0) {
       onChangeMinutes(val);
     }
-    setShowModal(false);
+    setTimeout(() => setShowModal(false), 150);
   };
 
   const title =
