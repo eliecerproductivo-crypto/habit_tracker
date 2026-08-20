@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { X } from "lucide-react";
 import { createPortal } from "react-dom";
 
@@ -7,10 +7,10 @@ export default function Modal({ open, onClose, title, children }) {
 
   // Blur active element before closing so Android keyboard dismisses
   // before the modal unmounts — prevents the dvh viewport jump blank-screen bug
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     document.activeElement?.blur();
     setTimeout(onClose, 100);
-  };
+  }, [onClose]);
 
   useEffect(() => {
     if (!open) return;
@@ -18,9 +18,13 @@ export default function Modal({ open, onClose, title, children }) {
       if (e.key === "Escape") handleClose();
     };
     document.addEventListener("keydown", onKey);
-    dialogRef.current?.focus();
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+    // Only focus the dialog container on first open, not on every re-render
+    const timeout = setTimeout(() => dialogRef.current?.focus(), 0);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      clearTimeout(timeout);
+    };
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!open) return null;
 
