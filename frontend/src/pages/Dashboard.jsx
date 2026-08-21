@@ -17,7 +17,15 @@ export default function Dashboard() {
   // convertirlo a fecha local antes de comparar, para evitar que un hábito
   // creado de noche aparezca como "del día siguiente".
   const habits = allHabits.filter((h) => {
-    const createdLocal = toLocalISODate(new Date(h.created_at + "Z")); // "Z" fuerza parsing como UTC
+    // created_at puede venir como "2026-08-20T15:30:00" (SQLite, sin zona)
+    // o como "2026-08-20T15:30:00+00:00" / "2026-08-20T15:30:00Z" (Postgres, con zona).
+    // Normalizamos: si no tiene info de zona, agregamos "Z" para forzar UTC.
+    // Si ya la tiene, la usamos tal cual.
+    const raw = h.created_at || "";
+    const hasZone = raw.endsWith("Z") || /[+-]\d{2}:\d{2}$/.test(raw);
+    const parsed = new Date(hasZone ? raw : raw + "Z");
+    if (isNaN(parsed.getTime())) return true; // si no se puede parsear, incluir el hábito
+    const createdLocal = toLocalISODate(parsed);
     return createdLocal <= selectedDate;
   });
 
