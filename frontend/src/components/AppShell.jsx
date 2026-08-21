@@ -61,11 +61,11 @@ export default function AppShell({ children }) {
             ))}
           </nav>
 
-          <div className="mt-auto flex items-center gap-2 border-t border-line pt-4">
+          <div className="mt-auto flex items-center gap-2 border-t border-line pt-4 group/user rounded-lg transition-colors hover:bg-panel-alt">
             <button
               onClick={() => setAccountOpen(true)}
               title="Configuración de la cuenta"
-              className="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1 text-left transition-colors hover:bg-panel-alt cursor-pointer"
+              className="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1 pl-2 text-left cursor-pointer"
             >
               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-violet-soft font-mono text-xs font-semibold text-violet">
                 {(user?.name || user?.email || "?").slice(0, 1).toUpperCase()}
@@ -79,7 +79,7 @@ export default function AppShell({ children }) {
               onClick={logout}
               aria-label="Cerrar sesión"
               title="Cerrar sesión"
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-coral-soft hover:text-coral cursor-pointer"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-coral-soft hover:text-coral cursor-pointer mr-1"
             >
               <LogOut size={16} />
             </button>

@@ -79,33 +79,32 @@ export default function TodayChecklist({ habits, logsByHabitId = {}, onSetStatus
               </p>
             </div>
 
-            {/* Status buttons */}
-            <div className="flex shrink-0 gap-1">
-              {Object.entries(STATUS_CONFIG).map(([statusKey, cfg]) => {
-                const BtnIcon = cfg.icon;
-                const isActive = currentStatus === statusKey;
+            {/* Status buttons — ocultos en fechas futuras */}
+            {!isFuture && (
+              <div className="flex shrink-0 gap-1">
+                {Object.entries(STATUS_CONFIG).map(([statusKey, cfg]) => {
+                  const BtnIcon = cfg.icon;
+                  const isActive = currentStatus === statusKey;
 
-                return (
-                  <button
-                    key={statusKey}
-                    disabled={isFuture}
-                    onClick={() => onSetStatus(habit.id, isActive ? null : statusKey)}
-                    aria-label={cfg.label}
-                    title={cfg.label}
-                    className={[
-                      "flex h-7 w-7 items-center justify-center rounded-full border-2 transition-colors",
-                      isFuture
-                        ? "cursor-not-allowed border-line text-transparent opacity-30"
-                        : isActive
-                        ? `cursor-pointer ${cfg.activeClass}`
-                        : `cursor-pointer border-line text-transparent ${cfg.hoverClass}`,
-                    ].join(" ")}
-                  >
-                    <BtnIcon size={13} strokeWidth={2.5} />
-                  </button>
-                );
-              })}
-            </div>
+                  return (
+                    <button
+                      key={statusKey}
+                      onClick={() => onSetStatus(habit.id, isActive ? null : statusKey)}
+                      aria-label={cfg.label}
+                      title={cfg.label}
+                      className={[
+                        "flex h-7 w-7 items-center justify-center rounded-full border-2 transition-colors cursor-pointer",
+                        isActive
+                          ? `${cfg.activeClass}`
+                          : `border-line text-transparent ${cfg.hoverClass}`,
+                      ].join(" ")}
+                    >
+                      <BtnIcon size={13} strokeWidth={2.5} />
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </li>
         );
       })}
