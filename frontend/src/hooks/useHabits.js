@@ -31,8 +31,12 @@ export function useHabits(date) {
     refresh();
   }, [refresh]);
 
+  // Map habit_id -> status ("done" | "skipped" | "failed") for logged habits
+  const logsByHabitId = Object.fromEntries(logs.map((l) => [l.habit_id, l]));
+
+  // Keep a simple Set for components that only need to know if done
   const completedHabitIds = new Set(
-    logs.filter((l) => l.completed).map((l) => l.habit_id)
+    logs.filter((l) => l.status === "done").map((l) => l.habit_id)
   );
 
   const createHabit = async (payload) => {
@@ -52,11 +56,26 @@ export function useHabits(date) {
     setHabits((h) => h.filter((x) => x.id !== id));
   };
 
-  const toggleForDate = async (habitId, completed) => {
+  /**
+   * Set the status for a habit on the target date.
+   * status: "done" | "skipped" | "failed"
+   * Passing null clears the log entirely (back to "sin registrar").
+   */
+  const setHabitStatus = async (habitId, status) => {
+    if (status === null) {
+      // Find the log id and delete it
+      const existing = logsByHabitId[habitId];
+      if (existing) {
+        await api.delete(`/logs/${existing.id}`);
+        setLogs((prev) => prev.filter((l) => l.habit_id !== habitId));
+      }
+      return;
+    }
+
     const res = await api.post("/logs", {
       habit_id: habitId,
       date: targetDate,
-      completed,
+      status,
     });
     setLogs((prev) => {
       const rest = prev.filter((l) => l.habit_id !== habitId);
@@ -67,6 +86,7 @@ export function useHabits(date) {
   return {
     habits,
     logs,
+    logsByHabitId,
     completedHabitIds,
     loading,
     error,
@@ -74,7 +94,10 @@ export function useHabits(date) {
     createHabit,
     updateHabit,
     deleteHabit,
-    toggleToday: toggleForDate,
+    setHabitStatus,
+    // legacy alias so nothing else breaks during the transition
+    toggleToday: (habitId, completed) =>
+      setHabitStatus(habitId, completed ? "done" : null),
     date: targetDate,
   };
 }

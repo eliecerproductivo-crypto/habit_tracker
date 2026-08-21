@@ -75,18 +75,28 @@ class HabitOut(HabitBase):
 
 # ---------- Logs ----------
 
+LOG_STATUSES = {"done", "skipped", "failed"}
+
+
 class LogCreate(BaseModel):
     habit_id: int
     date: date
-    completed: bool = True
+    status: str = "done"
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: str) -> str:
+        if v not in LOG_STATUSES:
+            raise ValueError("status must be one of: done, skipped, failed")
+        return v
 
 
 class LogOut(BaseModel):
     id: int
     habit_id: int
     date: date
-    completed: bool
-    completed_at: datetime
+    status: str
+    logged_at: datetime
 
     class Config:
         from_attributes = True

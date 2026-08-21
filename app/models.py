@@ -1,4 +1,4 @@
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 
 from sqlalchemy import (
     Boolean,
@@ -22,7 +22,7 @@ class User(Base):
     name = Column(String(120), nullable=False)
     email = Column(String(255), unique=True, index=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     habits = relationship("Habit", back_populates="owner", cascade="all, delete-orphan")
 
@@ -45,7 +45,7 @@ class Habit(Base):
     end_time = Column(String(5), nullable=False, default="09:00")
 
     is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     owner = relationship("User", back_populates="habits")
     logs = relationship("HabitLog", back_populates="habit", cascade="all, delete-orphan")
@@ -60,7 +60,8 @@ class HabitLog(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
 
     date = Column(Date, nullable=False, default=date.today, index=True)
-    completed = Column(Boolean, nullable=False, default=True)
-    completed_at = Column(DateTime, default=datetime.utcnow)
+    # "done" = lo hice | "skipped" = no pude (omitido) | "failed" = no quise (fallido)
+    status = Column(String(10), nullable=False, default="done")
+    logged_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     habit = relationship("Habit", back_populates="logs")

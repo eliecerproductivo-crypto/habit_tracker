@@ -1,9 +1,33 @@
-import { Check } from "lucide-react";
+import { Check, X, MinusCircle } from "lucide-react";
 import { categoryMeta } from "../lib/categories";
 import { formatTime, parseDays, toMinutes, todayLocalISODate, weekdayOfISODate } from "../lib/schedule";
 
-export default function TodayChecklist({ habits, completedHabitIds, onToggle, date }) {
-  const weekday = weekdayOfISODate(date || todayLocalISODate());
+const STATUS_CONFIG = {
+  done: {
+    icon: Check,
+    label: "Hecho",
+    activeClass: "bg-mint text-white border-mint",
+    hoverClass: "hover:border-mint hover:text-mint",
+  },
+  skipped: {
+    icon: MinusCircle,
+    label: "Omitir",
+    activeClass: "bg-signal text-white border-signal",
+    hoverClass: "hover:border-signal hover:text-signal",
+  },
+  failed: {
+    icon: X,
+    label: "Fallido",
+    activeClass: "bg-coral text-white border-coral",
+    hoverClass: "hover:border-coral hover:text-coral",
+  },
+};
+
+export default function TodayChecklist({ habits, logsByHabitId = {}, onSetStatus, date }) {
+  const resolvedDate = date || todayLocalISODate();
+  const isFuture = resolvedDate > todayLocalISODate();
+  const weekday = weekdayOfISODate(resolvedDate);
+
   const todays = habits
     .filter((h) => h.is_active !== false && parseDays(h.days_of_week).includes(weekday))
     .sort((a, b) => toMinutes(a.start_time) - toMinutes(b.start_time));
@@ -22,27 +46,15 @@ export default function TodayChecklist({ habits, completedHabitIds, onToggle, da
     <ul className="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-panel">
       {todays.map((habit) => {
         const meta = categoryMeta(habit.category);
-        const done = completedHabitIds.has(habit.id);
         const Icon = meta.icon;
+        const currentStatus = logsByHabitId[habit.id]?.status ?? null;
+
         return (
           <li
             key={habit.id}
-            className="flex items-center gap-3 px-4 py-3.5 transition-colors hover:bg-panel-alt/60"
+            className="flex items-center gap-3 px-4 py-3.5"
           >
-            <button
-              onClick={() => onToggle(habit.id, !done)}
-              aria-pressed={done}
-              aria-label={done ? `Marcar ${habit.name} como pendiente` : `Marcar ${habit.name} como hecho`}
-              className={[
-                "flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 transition-colors cursor-pointer",
-                done
-                  ? "border-mint bg-mint text-white"
-                  : "border-line text-transparent hover:border-ink-faint",
-              ].join(" ")}
-            >
-              <Check size={14} strokeWidth={3} />
-            </button>
-
+            {/* Category icon */}
             <span
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
               style={{ backgroundColor: `var(--${meta.token}-soft)`, color: `var(--${meta.token})` }}
@@ -50,13 +62,49 @@ export default function TodayChecklist({ habits, completedHabitIds, onToggle, da
               <Icon size={15} />
             </span>
 
+            {/* Name + time */}
             <div className="min-w-0 flex-1">
-              <p className={["truncate text-sm font-medium", done ? "text-ink-faint line-through" : "text-ink"].join(" ")}>
+              <p className={[
+                "truncate text-sm font-medium",
+                currentStatus === "done"
+                  ? "text-ink-faint line-through"
+                  : currentStatus === "failed"
+                  ? "text-coral/70 line-through"
+                  : "text-ink",
+              ].join(" ")}>
                 {habit.name}
               </p>
               <p className="font-mono text-xs text-ink-faint tabular">
                 {formatTime(habit.start_time)} – {formatTime(habit.end_time)}
               </p>
+            </div>
+
+            {/* Status buttons */}
+            <div className="flex shrink-0 gap-1">
+              {Object.entries(STATUS_CONFIG).map(([statusKey, cfg]) => {
+                const BtnIcon = cfg.icon;
+                const isActive = currentStatus === statusKey;
+
+                return (
+                  <button
+                    key={statusKey}
+                    disabled={isFuture}
+                    onClick={() => onSetStatus(habit.id, isActive ? null : statusKey)}
+                    aria-label={cfg.label}
+                    title={cfg.label}
+                    className={[
+                      "flex h-7 w-7 items-center justify-center rounded-full border-2 transition-colors",
+                      isFuture
+                        ? "cursor-not-allowed border-line text-transparent opacity-30"
+                        : isActive
+                        ? `cursor-pointer ${cfg.activeClass}`
+                        : `cursor-pointer border-line text-transparent ${cfg.hoverClass}`,
+                    ].join(" ")}
+                  >
+                    <BtnIcon size={13} strokeWidth={2.5} />
+                  </button>
+                );
+              })}
             </div>
           </li>
         );

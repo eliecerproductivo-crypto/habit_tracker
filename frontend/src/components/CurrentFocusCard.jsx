@@ -1,10 +1,34 @@
-import { CheckCircle2, Circle, ArrowRight } from "lucide-react";
+import { Check, X, MinusCircle, ArrowRight } from "lucide-react";
 import DayRail from "./DayRail";
 import { categoryMeta } from "../lib/categories";
 import { formatTime, getCurrentAndNext, formatDateLabel, todayLocalISODate } from "../lib/schedule";
 import { useNow } from "../hooks/useNow";
 
-export default function CurrentFocusCard({ habits, completedHabitIds, onToggle, date }) {
+const STATUS_CONFIG = [
+  {
+    key: "done",
+    label: "Hecho",
+    icon: Check,
+    activeClass: "bg-mint text-white border-mint",
+    idleClass: "border-line text-ink-faint hover:border-mint hover:text-mint",
+  },
+  {
+    key: "skipped",
+    label: "Omitir",
+    icon: MinusCircle,
+    activeClass: "bg-signal text-white border-signal",
+    idleClass: "border-line text-ink-faint hover:border-signal hover:text-signal",
+  },
+  {
+    key: "failed",
+    label: "Fallido",
+    icon: X,
+    activeClass: "bg-coral text-white border-coral",
+    idleClass: "border-line text-ink-faint hover:border-coral hover:text-coral",
+  },
+];
+
+export default function CurrentFocusCard({ habits, logsByHabitId = {}, onSetStatus, date }) {
   const now = useNow();
   const isToday = !date || date === todayLocalISODate();
   const { current, next } = isToday ? getCurrentAndNext(habits, now) : { current: null, next: null };
@@ -14,8 +38,8 @@ export default function CurrentFocusCard({ habits, completedHabitIds, onToggle, 
     ? now.toLocaleDateString("es", { weekday: "long", day: "numeric", month: "long" })
     : formatDateLabel(date);
 
-  const currentDone = current ? completedHabitIds.has(current.id) : false;
   const meta = current ? categoryMeta(current.category) : null;
+  const currentStatus = current ? (logsByHabitId[current.id]?.status ?? null) : null;
 
   return (
     <section
@@ -33,7 +57,8 @@ export default function CurrentFocusCard({ habits, completedHabitIds, onToggle, 
 
       <div className="mt-4">
         {current ? (
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-4">
+            {/* Habit info */}
             <div className="min-w-0">
               <p
                 className="mb-1 font-mono text-[11px] font-semibold uppercase tracking-wide"
@@ -41,7 +66,14 @@ export default function CurrentFocusCard({ habits, completedHabitIds, onToggle, 
               >
                 Ahora mismo · {meta.label}
               </p>
-              <h2 className="truncate text-2xl font-semibold tracking-tight md:text-3xl">
+              <h2 className={[
+                "truncate text-2xl font-semibold tracking-tight md:text-3xl",
+                currentStatus === "done"
+                  ? "text-ink-faint line-through"
+                  : currentStatus === "failed"
+                  ? "text-coral/70 line-through"
+                  : "text-ink",
+              ].join(" ")}>
                 {current.name}
               </h2>
               <p className="mt-1 font-mono text-sm text-ink-soft tabular">
@@ -49,16 +81,30 @@ export default function CurrentFocusCard({ habits, completedHabitIds, onToggle, 
               </p>
             </div>
 
-            <button
-              onClick={() => onToggle(current.id, !currentDone)}
-              className={[
-                "flex shrink-0 items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold transition-colors cursor-pointer",
-                currentDone ? "bg-mint-soft text-mint" : "bg-ink text-bg hover:opacity-90",
-              ].join(" ")}
-            >
-              {currentDone ? <CheckCircle2 size={18} aria-hidden="true" /> : <Circle size={18} aria-hidden="true" />}
-              {currentDone ? "Completado" : "Marcar como hecho"}
-            </button>
+            {/* 3-state action buttons */}
+            <div className="flex flex-wrap gap-2">
+              {STATUS_CONFIG.map(({ key, label, icon: BtnIcon, activeClass, idleClass }) => {
+                const isActive = currentStatus === key;
+                return (
+                  <button
+                    key={key}
+                    disabled={!isToday}
+                    onClick={() => isToday && onSetStatus(current.id, isActive ? null : key)}
+                    className={[
+                      "flex items-center gap-2 rounded-xl border-2 px-4 py-2 text-sm font-semibold transition-colors",
+                      isToday
+                        ? isActive
+                          ? `cursor-pointer ${activeClass}`
+                          : `cursor-pointer ${idleClass}`
+                        : "cursor-not-allowed border-line text-ink-faint opacity-40",
+                    ].join(" ")}
+                  >
+                    <BtnIcon size={15} strokeWidth={2.5} />
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         ) : (
           <div>
@@ -91,7 +137,11 @@ export default function CurrentFocusCard({ habits, completedHabitIds, onToggle, 
           now={now}
           date={date}
           showNow={isToday}
-          completedHabitIds={completedHabitIds}
+          completedHabitIds={new Set(
+            Object.entries(logsByHabitId)
+              .filter(([, log]) => log.status === "done")
+              .map(([id]) => Number(id))
+          )}
         />
       </div>
     </section>

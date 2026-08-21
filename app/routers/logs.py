@@ -1,4 +1,4 @@
-from datetime import date as date_type
+from datetime import date as date_type, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -36,6 +36,10 @@ def upsert_log(
     if not habit:
         raise HTTPException(status_code=404, detail="Hábito no encontrado.")
 
+    today = datetime.now(timezone.utc).date()
+    if payload.date > today:
+        raise HTTPException(status_code=400, detail="No puedes registrar un hábito en una fecha futura.")
+
     log = (
         db.query(models.HabitLog)
         .filter(
@@ -46,16 +50,36 @@ def upsert_log(
     )
 
     if log:
-        log.completed = payload.completed
+        log.status = payload.status
+        log.logged_at = datetime.now(timezone.utc)
     else:
         log = models.HabitLog(
             habit_id=payload.habit_id,
             user_id=current_user.id,
             date=payload.date,
-            completed=payload.completed,
+            status=payload.status,
         )
         db.add(log)
 
     db.commit()
     db.refresh(log)
     return log
+
+
+@router.delete("/{log_id}", status_code=204)
+def delete_log(
+    log_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Elimina el log (vuelve el hábito a estado 'sin registrar' para ese día)."""
+    log = (
+        db.query(models.HabitLog)
+        .filter(models.HabitLog.id == log_id, models.HabitLog.user_id == current_user.id)
+        .first()
+    )
+    if not log:
+        raise HTTPException(status_code=404, detail="Log no encontrado.")
+    db.delete(log)
+    db.commit()
+    return None

@@ -43,7 +43,7 @@ export default function AppShell({ children }) {
 
   return (
     <div className="min-h-dvh bg-bg text-ink">
-      <div className="mx-auto flex max-w-7xl">
+      <div className="mx-auto flex max-w-screen">
         {/* Sidebar (desktop) */}
         <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-line px-4 py-6 md:flex">
           <div className="flex items-center gap-2 px-2 pb-8">

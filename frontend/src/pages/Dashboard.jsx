@@ -5,15 +5,21 @@ import StatCard from "../components/StatCard";
 import DateNavBar from "../components/DateNavBar";
 import { useHabits } from "../hooks/useHabits";
 import { useStats } from "../hooks/useStats";
-import { parseDays, todayLocalISODate, weekdayOfISODate } from "../lib/schedule";
+import { parseDays, todayLocalISODate, toLocalISODate, weekdayOfISODate } from "../lib/schedule";
 
 export default function Dashboard() {
   const [selectedDate, setSelectedDate] = useState(todayLocalISODate());
-  const { habits: allHabits, completedHabitIds, loading, error, toggleToday } = useHabits(selectedDate);
+  const { habits: allHabits, completedHabitIds, logsByHabitId, loading, error, setHabitStatus } = useHabits(selectedDate);
   const { summary } = useStats();
 
-  // Excluir hábitos que no existían en la fecha seleccionada
-  const habits = allHabits.filter((h) => h.created_at.slice(0, 10) <= selectedDate);
+  // Excluir hábitos que no existían en la fecha seleccionada.
+  // created_at viene del backend en UTC (sin sufijo de zona), así que hay que
+  // convertirlo a fecha local antes de comparar, para evitar que un hábito
+  // creado de noche aparezca como "del día siguiente".
+  const habits = allHabits.filter((h) => {
+    const createdLocal = toLocalISODate(new Date(h.created_at + "Z")); // "Z" fuerza parsing como UTC
+    return createdLocal <= selectedDate;
+  });
 
   const isToday = selectedDate === todayLocalISODate();
   const weekday = weekdayOfISODate(selectedDate);
@@ -35,8 +41,8 @@ export default function Dashboard() {
         <>
           <CurrentFocusCard
             habits={habits}
-            completedHabitIds={completedHabitIds}
-            onToggle={toggleToday}
+            logsByHabitId={logsByHabitId}
+            onSetStatus={setHabitStatus}
             date={selectedDate}
           />
 
@@ -67,8 +73,8 @@ export default function Dashboard() {
             </h2>
             <TodayChecklist
               habits={habits}
-              completedHabitIds={completedHabitIds}
-              onToggle={toggleToday}
+              logsByHabitId={logsByHabitId}
+              onSetStatus={setHabitStatus}
               date={selectedDate}
             />
           </div>
