@@ -25,6 +25,8 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     habits = relationship("Habit", back_populates="owner", cascade="all, delete-orphan")
+    sent_requests = relationship("Friendship", foreign_keys="Friendship.requester_id", back_populates="requester", cascade="all, delete-orphan")
+    received_requests = relationship("Friendship", foreign_keys="Friendship.addressee_id", back_populates="addressee", cascade="all, delete-orphan")
 
 
 class Habit(Base):
@@ -72,3 +74,17 @@ class HabitLog(Base):
     logged_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     habit = relationship("Habit", back_populates="logs")
+
+
+class Friendship(Base):
+    __tablename__ = "friendships"
+
+    id = Column(Integer, primary_key=True, index=True)
+    requester_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    addressee_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    # "pending" | "accepted" | "rejected"
+    status = Column(String(10), nullable=False, default="pending")
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    requester = relationship("User", foreign_keys=[requester_id], back_populates="sent_requests")
+    addressee = relationship("User", foreign_keys=[addressee_id], back_populates="received_requests")

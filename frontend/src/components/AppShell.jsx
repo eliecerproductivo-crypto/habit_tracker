@@ -1,20 +1,22 @@
 import { useState } from "react";
 import { NavLink } from "react-router-dom";
-import { LayoutGrid, ListChecks, BarChart3, LogOut, CheckCircle2, UserRound } from "lucide-react";
+import { LayoutGrid, ListChecks, BarChart3, LogOut, CheckCircle2, UserRound, Users } from "lucide-react";
 import ThemeToggle from "./ThemeToggle";
 import NotificationToggle from "./NotificationToggle";
 import AccountModal from "./AccountModal";
 import { useAuth } from "../context/AuthContext";
 import { useHabits } from "../hooks/useHabits";
 import { useNotifications } from "../hooks/useNotifications";
+import { useFriends } from "../hooks/useFriends";
 
 const NAV_ITEMS = [
   { to: "/", label: "Hoy", icon: LayoutGrid, end: true },
   { to: "/habitos", label: "Hábitos", icon: ListChecks },
   { to: "/estadisticas", label: "Estadísticas", icon: BarChart3 },
+  { to: "/amigos", label: "Amigos", icon: Users },
 ];
 
-function NavItem({ to, label, icon: Icon, end }) {
+function NavItem({ to, label, icon: Icon, end, badge }) {
   return (
     <NavLink
       to={to}
@@ -30,6 +32,11 @@ function NavItem({ to, label, icon: Icon, end }) {
     >
       <Icon size={18} strokeWidth={2} />
       {label}
+      {badge > 0 && (
+        <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-coral px-1 font-mono text-[10px] font-bold text-white">
+          {badge}
+        </span>
+      )}
     </NavLink>
   );
 }
@@ -39,7 +46,10 @@ export default function AppShell({ children }) {
   const { habits } = useHabits();
   const { permission, advanceMinutes, requestPermission, setAdvanceMinutes } =
     useNotifications(habits);
+  const { pending } = useFriends();
   const [accountOpen, setAccountOpen] = useState(false);
+
+  const pendingCount = pending.length;
 
   return (
     <div className="min-h-dvh bg-bg text-ink">
@@ -57,7 +67,11 @@ export default function AppShell({ children }) {
 
           <nav className="flex flex-1 flex-col gap-1">
             {NAV_ITEMS.map((item) => (
-              <NavItem key={item.to} {...item} />
+              <NavItem
+                key={item.to}
+                {...item}
+                badge={item.to === "/amigos" ? pendingCount : 0}
+              />
             ))}
           </nav>
 
@@ -128,12 +142,19 @@ export default function AppShell({ children }) {
                 end={end}
                 className={({ isActive }) =>
                   [
-                    "flex flex-col items-center gap-0.5 rounded-lg px-4 py-1.5 text-[11px] font-medium",
+                    "relative flex flex-col items-center gap-0.5 rounded-lg px-4 py-1.5 text-[11px] font-medium",
                     isActive ? "text-signal" : "text-ink-faint",
                   ].join(" ")
                 }
               >
-                <Icon size={19} />
+                <span className="relative">
+                  <Icon size={19} />
+                  {to === "/amigos" && pendingCount > 0 && (
+                    <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-coral px-0.5 font-mono text-[9px] font-bold text-white">
+                      {pendingCount}
+                    </span>
+                  )}
+                </span>
                 {label}
               </NavLink>
             ))}
@@ -145,4 +166,3 @@ export default function AppShell({ children }) {
     </div>
   );
 }
-

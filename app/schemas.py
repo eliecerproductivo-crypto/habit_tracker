@@ -137,3 +137,32 @@ class UserUpdate(BaseModel):
 class PasswordChange(BaseModel):
     current_password: str = Field(min_length=1)
     new_password: str = Field(min_length=6, max_length=200)
+
+
+# ---------- Friends ----------
+
+class FriendRequest(BaseModel):
+    email: EmailStr
+
+class FriendOut(BaseModel):
+    id: int
+    name: str
+    email: EmailStr
+
+    class Config:
+        from_attributes = True
+
+class FriendshipOut(BaseModel):
+    id: int
+    status: str
+    friend: FriendOut
+    i_am_requester: bool
+
+    class Config:
+        from_attributes = True
+
+class FriendStatsOut(BaseModel):
+    friend: FriendOut
+    current_streak: int
+    week_completion_rate: int
+    total_completed: int
