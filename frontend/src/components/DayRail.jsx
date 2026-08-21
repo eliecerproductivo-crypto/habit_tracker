@@ -1,5 +1,5 @@
 import { categoryMeta } from "../lib/categories";
-import { parseDays, toMinutes, formatTime, weekdayOfISODate } from "../lib/schedule";
+import { toMinutes, formatTime, habitOccursOnDate, todayLocalISODate } from "../lib/schedule";
 
 const DAY_MIN = 24 * 60;
 const VIEW_START = 5 * 60 + 30;  // 5:30 AM in minutes
@@ -43,13 +43,13 @@ function clipSegment(start, end) {
 }
 
 export default function DayRail({ habits, now, date, showNow = true, completedHabitIds }) {
-  const day = date ? weekdayOfISODate(date) : now.getDay();
+  const resolvedDate = date || todayLocalISODate();
   const nowMinutes = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
   const nowPct = toViewPct(nowMinutes);
   const nowVisible = showNow && nowMinutes >= VIEW_START && nowMinutes <= VIEW_END;
 
   const todays = habits.filter(
-    (h) => h.is_active !== false && parseDays(h.days_of_week).includes(day)
+    (h) => h.is_active !== false && habitOccursOnDate(h, resolvedDate)
   );
 
   return (

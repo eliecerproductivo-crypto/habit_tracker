@@ -43,10 +43,51 @@ export function formatDuration(startMinutes, endMinutes) {
   return `${h} h ${m} min`;
 }
 
+/**
+ * Returns true if a habit is scheduled to occur on a given ISO date string.
+ * Handles all three recurrence types: weekly, interval, monthly.
+ */
+export function habitOccursOnDate(habit, isoDate) {
+  const type = habit.recurrence_type || "weekly";
+
+  if (type === "weekly") {
+    const weekday = weekdayOfISODate(isoDate);
+    return parseDays(habit.days_of_week).includes(weekday);
+  }
+
+  if (type === "interval") {
+    const interval = habit.recurrence_interval;
+    if (!interval || interval < 1) return false;
+    // Need a reference date — use start_date if set, otherwise created_at date
+    const refRaw = habit.start_date || (habit.created_at ? habit.created_at.slice(0, 10) : null);
+    if (!refRaw) return false;
+    const ref = refRaw.slice(0, 10);
+    const [ry, rm, rd] = ref.split("-").map(Number);
+    const [ty, tm, td] = isoDate.split("-").map(Number);
+    const refMs = new Date(ry, rm - 1, rd).getTime();
+    const targetMs = new Date(ty, tm - 1, td).getTime();
+    const diffDays = Math.round((targetMs - refMs) / 86400000);
+    return diffDays >= 0 && diffDays % interval === 0;
+  }
+
+  if (type === "monthly") {
+    const dom = habit.recurrence_day_of_month;
+    if (dom == null) return false;
+    const [y, m, d] = isoDate.split("-").map(Number);
+    if (dom === -1) {
+      // last day of month
+      const lastDay = new Date(y, m, 0).getDate();
+      return d === lastDay;
+    }
+    return d === dom;
+  }
+
+  return false;
+}
+
 export function habitStatusNow(habit, now = new Date()) {
-  const day = now.getDay();
-  const days = parseDays(habit.days_of_week);
-  if (!days.includes(day)) return "not-scheduled";
+  const isoDate = toLocalISODate(now);
+  if (!habitOccursOnDate(habit, isoDate)) return "not-scheduled";
 
   const nowMinutes = now.getHours() * 60 + now.getMinutes();
   const start = toMinutes(habit.start_time);

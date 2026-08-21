@@ -43,6 +43,10 @@ class HabitBase(BaseModel):
     start_time: str = Field(pattern=TIME_RE)
     end_time: str = Field(pattern=TIME_RE)
     is_active: bool = True
+    start_date: Optional[date] = None
+    recurrence_type: str = Field(default="weekly", pattern="^(weekly|interval|monthly)$")
+    recurrence_interval: Optional[int] = Field(default=None, ge=1, le=365)
+    recurrence_day_of_month: Optional[int] = Field(default=None, ge=-1, le=31)
 
     @field_validator("days_of_week")
     @classmethod
@@ -68,6 +72,10 @@ class HabitOut(HabitBase):
     id: int
     user_id: int
     created_at: datetime
+    start_date: Optional[date] = None
+    recurrence_type: str = "weekly"
+    recurrence_interval: Optional[int] = None
+    recurrence_day_of_month: Optional[int] = None
 
     class Config:
         from_attributes = True

@@ -5,7 +5,7 @@ import StatCard from "../components/StatCard";
 import DateNavBar from "../components/DateNavBar";
 import { useHabits } from "../hooks/useHabits";
 import { useStats } from "../hooks/useStats";
-import { parseDays, todayLocalISODate, toLocalISODate, weekdayOfISODate } from "../lib/schedule";
+import { parseDays, todayLocalISODate, toLocalISODate, habitOccursOnDate } from "../lib/schedule";
 
 export default function Dashboard() {
   const [selectedDate, setSelectedDate] = useState(todayLocalISODate());
@@ -26,13 +26,16 @@ export default function Dashboard() {
     const parsed = new Date(hasZone ? raw : raw + "Z");
     if (isNaN(parsed.getTime())) return true; // si no se puede parsear, incluir el hábito
     const createdLocal = toLocalISODate(parsed);
-    return createdLocal <= selectedDate;
+    // Si tiene start_date explícita, usarla como límite; si no, usar created_at
+    const effectiveStart = h.start_date
+      ? String(h.start_date).slice(0, 10)
+      : createdLocal;
+    return effectiveStart <= selectedDate;
   });
 
   const isToday = selectedDate === todayLocalISODate();
-  const weekday = weekdayOfISODate(selectedDate);
   const scheduledToday = habits.filter(
-    (h) => h.is_active !== false && parseDays(h.days_of_week).includes(weekday)
+    (h) => h.is_active !== false && habitOccursOnDate(h, selectedDate)
   );
   const doneToday = scheduledToday.filter((h) => completedHabitIds.has(h.id)).length;
   const pct = scheduledToday.length ? Math.round((doneToday / scheduledToday.length) * 100) : 0;

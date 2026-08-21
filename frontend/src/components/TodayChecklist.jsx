@@ -1,6 +1,6 @@
 import { Check, X, MinusCircle } from "lucide-react";
 import { categoryMeta } from "../lib/categories";
-import { formatTime, parseDays, toMinutes, todayLocalISODate, weekdayOfISODate } from "../lib/schedule";
+import { formatTime, toMinutes, todayLocalISODate, habitOccursOnDate } from "../lib/schedule";
 
 const STATUS_CONFIG = {
   done: {
@@ -26,10 +26,9 @@ const STATUS_CONFIG = {
 export default function TodayChecklist({ habits, logsByHabitId = {}, onSetStatus, date }) {
   const resolvedDate = date || todayLocalISODate();
   const isFuture = resolvedDate > todayLocalISODate();
-  const weekday = weekdayOfISODate(resolvedDate);
 
   const todays = habits
-    .filter((h) => h.is_active !== false && parseDays(h.days_of_week).includes(weekday))
+    .filter((h) => h.is_active !== false && habitOccursOnDate(h, resolvedDate))
     .sort((a, b) => toMinutes(a.start_time) - toMinutes(b.start_time));
 
   if (todays.length === 0) {

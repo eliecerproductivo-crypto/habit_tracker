@@ -45,6 +45,13 @@ class Habit(Base):
     end_time = Column(String(5), nullable=False, default="09:00")
 
     is_active = Column(Boolean, default=True, nullable=False)
+    start_date = Column(Date, nullable=True, default=None)
+    # recurrence_type: "weekly" | "interval" | "monthly"
+    recurrence_type = Column(String(10), nullable=False, default="weekly")
+    # interval: repeat every N days (used when recurrence_type="interval")
+    recurrence_interval = Column(Integer, nullable=True, default=None)
+    # day_of_month: 1-28 or -1 for last day (used when recurrence_type="monthly")
+    recurrence_day_of_month = Column(Integer, nullable=True, default=None)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     owner = relationship("User", back_populates="habits")
