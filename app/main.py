@@ -29,6 +29,20 @@ def on_startup():
     init_db()
 
 
+# Vercel serverless: startup may not fire on every cold start.
+# Run init_db lazily on the first real request as a safety net.
+_db_initialized = False
+
+
+@app.middleware("http")
+async def ensure_db(request, call_next):
+    global _db_initialized
+    if not _db_initialized:
+        init_db()
+        _db_initialized = True
+    return await call_next(request)
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}

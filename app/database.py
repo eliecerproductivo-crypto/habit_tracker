@@ -49,9 +49,47 @@ def get_db():
         db.close()
 
 
+def _migrate(connection):
+    """Apply incremental schema changes that create_all cannot handle
+    (renaming/replacing columns on existing tables)."""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(connection)
+    tables = inspector.get_table_names()
+
+    # ── habit_logs: completed+completed_at → status+logged_at ──────────────
+    if "habit_logs" in tables:
+        columns = {c["name"] for c in inspector.get_columns("habit_logs")}
+
+        if "completed" in columns and "status" not in columns:
+            # Postgres and SQLite both support ADD COLUMN
+            connection.execute(text(
+                "ALTER TABLE habit_logs ADD COLUMN status VARCHAR(10) NOT NULL DEFAULT 'done'"
+            ))
+            connection.execute(text(
+                "UPDATE habit_logs SET status = CASE WHEN completed THEN 'done' ELSE 'failed' END"
+            ))
+
+        if "completed_at" in columns and "logged_at" not in columns:
+            # Postgres supports RENAME COLUMN; SQLite ≥3.25 also does
+            connection.execute(text(
+                "ALTER TABLE habit_logs RENAME COLUMN completed_at TO logged_at"
+            ))
+
+        # Drop old column only on Postgres (SQLite < 3.35 doesn't support DROP COLUMN)
+        if "completed" in columns and "status" in columns:
+            dialect = connection.dialect.name
+            if dialect == "postgresql":
+                connection.execute(text(
+                    "ALTER TABLE habit_logs DROP COLUMN IF EXISTS completed"
+                ))
+
+
 def init_db():
-    # Creates tables if they don't exist yet. Fine for this project's scope;
-    # swap for Alembic migrations if the schema needs to evolve carefully later.
+    # Creates tables if they don't exist yet, then applies pending migrations.
     from app import models  # noqa: F401  (ensures models are registered)
 
     Base.metadata.create_all(bind=engine)
+
+    with engine.begin() as conn:
+        _migrate(conn)
