@@ -88,3 +88,14 @@ class Friendship(Base):
 
     requester = relationship("User", foreign_keys=[requester_id], back_populates="sent_requests")
     addressee = relationship("User", foreign_keys=[addressee_id], back_populates="received_requests")
+
+
+class Category(Base):
+    __tablename__ = "categories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    name = Column(String(100), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    owner = relationship("User", foreign_keys=[user_id])
