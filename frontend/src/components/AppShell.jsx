@@ -146,5 +146,3 @@ export default function AppShell({ children }) {
   );
 }
 
-
-DATABASE_URL="postgresql://postgres.xdsbqpolxrnnhymflnkt:Ee8K9kX33@@aws-0-us-east-1.pooler.supabase.com:6543/postgres?pgbouncer=true"
