@@ -20,7 +20,11 @@ export const CATEGORIES = {
 };
 
 export function categoryMeta(key) {
-  return CATEGORIES[key] || CATEGORIES.otro;
+  if (CATEGORIES[key]) return CATEGORIES[key];
+  // Custom category — cycle through available tokens for variety
+  const tokens = ["signal", "violet", "mint", "sky", "coral"];
+  const index = key ? Math.abs(key.split("").reduce((a, c) => a + c.charCodeAt(0), 0)) % tokens.length : 0;
+  return { label: key || "Otro", icon: Sparkles, token: tokens[index] };
 }
 
 export const CATEGORY_OPTIONS = Object.entries(CATEGORIES).map(([value, v]) => ({

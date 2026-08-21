@@ -112,16 +112,30 @@ export default function HabitForm({ initial, onSubmit, onCancel, submitLabel = "
 
       {/* Categoría */}
       <div>
-        <label className="mb-1 block text-xs font-medium text-ink-soft">Categoría</label>
-        <select
+        <label className="mb-1.5 block text-xs font-medium text-ink-soft">Categoría</label>
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {CATEGORY_OPTIONS.map((c) => (
+            <button
+              key={c.value}
+              type="button"
+              onClick={() => set("category", c.value)}
+              className={[
+                "rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer",
+                form.category === c.value
+                  ? "bg-signal text-panel"
+                  : "bg-panel-alt text-ink-faint hover:text-ink",
+              ].join(" ")}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+        <input
           className={inputClass}
           value={form.category}
-          onChange={(e) => set("category", e.target.value)}
-        >
-          {CATEGORY_OPTIONS.map((c) => (
-            <option key={c.value} value={c.value}>{c.label}</option>
-          ))}
-        </select>
+          onChange={(e) => set("category", e.target.value.toLowerCase().trim())}
+          placeholder="O escribe una categoría personalizada"
+        />
       </div>
 
       {/* Horas */}
