@@ -64,7 +64,6 @@ def _migrate(connection):
         columns = {c["name"] for c in inspector.get_columns("habit_logs")}
 
         if "completed" in columns and "status" not in columns:
-            # Postgres and SQLite both support ADD COLUMN
             connection.execute(text(
                 "ALTER TABLE habit_logs ADD COLUMN status VARCHAR(10) NOT NULL DEFAULT 'done'"
             ))
@@ -73,18 +72,27 @@ def _migrate(connection):
             ))
 
         if "completed_at" in columns and "logged_at" not in columns:
-            # Postgres supports RENAME COLUMN; SQLite ≥3.25 also does
             connection.execute(text(
                 "ALTER TABLE habit_logs RENAME COLUMN completed_at TO logged_at"
             ))
 
-        # Drop old column only on Postgres (SQLite < 3.35 doesn't support DROP COLUMN)
         if "completed" in columns and "status" in columns:
             dialect = connection.dialect.name
             if dialect == "postgresql":
                 connection.execute(text(
                     "ALTER TABLE habit_logs DROP COLUMN IF EXISTS completed"
                 ))
+
+    # ── habits: start_time / end_time → nullable ───────────────────────────
+    if "habits" in tables:
+        dialect = connection.dialect.name
+        if dialect == "postgresql":
+            connection.execute(text(
+                "ALTER TABLE habits ALTER COLUMN start_time DROP NOT NULL"
+            ))
+            connection.execute(text(
+                "ALTER TABLE habits ALTER COLUMN end_time DROP NOT NULL"
+            ))
 
 
 def init_db():

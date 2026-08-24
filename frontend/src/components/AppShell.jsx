@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { NavLink } from "react-router-dom";
-import { LayoutGrid, ListChecks, BarChart3, LogOut, CheckCircle2, UserRound, Users } from "lucide-react";
+import { LayoutGrid, ListChecks, BarChart3, LogOut, CheckCircle2, UserRound, Users, BookOpen } from "lucide-react";
 import ThemeToggle from "./ThemeToggle";
 import NotificationToggle from "./NotificationToggle";
 import AccountModal from "./AccountModal";
@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { to: "/habitos", label: "Hábitos", icon: ListChecks },
   { to: "/estadisticas", label: "Estadísticas", icon: BarChart3 },
   { to: "/amigos", label: "Amigos", icon: Users },
+  { to: "/diario", label: "Diario", icon: BookOpen },
 ];
 
 function NavItem({ to, label, icon: Icon, end, badge }) {

@@ -10,6 +10,7 @@ import Dashboard from "./pages/Dashboard";
 import Habits from "./pages/Habits";
 import Stats from "./pages/Stats";
 import Friends from "./pages/Friends";
+import Journal from "./pages/Journal";
 
 function FullScreenLoader() {
   return (
@@ -83,6 +84,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <Friends />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/diario"
+        element={
+          <ProtectedRoute>
+            <Journal />
           </ProtectedRoute>
         }
       />
