@@ -43,7 +43,10 @@ export default function HabitCard({ habit, onEdit, onDelete }) {
       </div>
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs text-ink-soft tabular">
-        <span>{formatTime(habit.start_time)} – {formatTime(habit.end_time)}</span>
+        {habit.start_time
+          ? <span>{formatTime(habit.start_time)} – {formatTime(habit.end_time)}</span>
+          : <span className="font-sans text-ink-faint">Sin hora fija</span>
+        }
         <span
           className="rounded-full px-2 py-0.5 font-sans font-medium"
           style={{ backgroundColor: `var(--${meta.token}-soft)`, color: `var(--${meta.token})` }}

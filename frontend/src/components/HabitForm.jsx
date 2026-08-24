@@ -8,6 +8,7 @@ const EMPTY = {
   description: "",
   category: "",
   days_of_week: [1, 2, 3, 4, 5],
+  has_time: false,
   start_time: "08:00",
   end_time: "09:00",
   start_date: "",
@@ -166,6 +167,7 @@ export default function HabitForm({ initial, onSubmit, onCancel, submitLabel = "
     return {
       ...EMPTY,
       ...initial,
+      has_time: !!(initial.start_time),
       days_of_week: Array.isArray(initial.days_of_week)
         ? initial.days_of_week
         : (initial.days_of_week || "").split(",").filter(Boolean).map(Number),
@@ -207,6 +209,8 @@ export default function HabitForm({ initial, onSubmit, onCancel, submitLabel = "
     try {
       await onSubmit({
         ...form,
+        start_time: form.has_time ? form.start_time : null,
+        end_time: form.has_time ? form.end_time : null,
         days_of_week: form.recurrence_type === "weekly" ? form.days_of_week.join(",") : "0",
         recurrence_interval: form.recurrence_type === "interval" ? Number(form.recurrence_interval) : null,
         recurrence_day_of_month: form.recurrence_type === "monthly" ? Number(form.recurrence_day_of_month) : null,
@@ -245,17 +249,44 @@ export default function HabitForm({ initial, onSubmit, onCancel, submitLabel = "
         <CategorySelect value={form.category} onChange={(v) => set("category", v)} />
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="mb-1 block text-xs font-medium text-ink-soft">Hora inicio</label>
-          <input type="time" className={inputClass} value={form.start_time}
-            onChange={(e) => set("start_time", e.target.value)} />
+      <div>
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-medium text-ink-soft">Hora fija</label>
+          <button
+            type="button"
+            onClick={() => set("has_time", !form.has_time)}
+            className={[
+              "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors",
+              form.has_time ? "bg-signal" : "bg-panel-alt",
+            ].join(" ")}
+            role="switch"
+            aria-checked={form.has_time}
+          >
+            <span
+              className={[
+                "pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transition-transform",
+                form.has_time ? "translate-x-4" : "translate-x-0",
+              ].join(" ")}
+            />
+          </button>
         </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-ink-soft">Hora fin</label>
-          <input type="time" className={inputClass} value={form.end_time}
-            onChange={(e) => set("end_time", e.target.value)} />
-        </div>
+        {form.has_time && (
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-ink-soft">Hora inicio</label>
+              <input type="time" className={inputClass} value={form.start_time}
+                onChange={(e) => set("start_time", e.target.value)} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-ink-soft">Hora fin</label>
+              <input type="time" className={inputClass} value={form.end_time}
+                onChange={(e) => set("end_time", e.target.value)} />
+            </div>
+          </div>
+        )}
+        {!form.has_time && (
+          <p className="mt-1 text-xs text-ink-faint">El hábito aparecerá sin horario asignado.</p>
+        )}
       </div>
 
       <div>

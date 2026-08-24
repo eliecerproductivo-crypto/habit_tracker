@@ -56,8 +56,8 @@ class Habit(Base):
     days_of_week = Column(String(20), nullable=False, default="0,1,2,3,4,5,6")
 
     # Stored as "HH:MM" 24h strings for simplicity across DB backends
-    start_time = Column(String(5), nullable=False, default="08:00")
-    end_time = Column(String(5), nullable=False, default="09:00")
+    start_time = Column(String(5), nullable=True, default=None)
+    end_time = Column(String(5), nullable=True, default=None)
 
     is_active = Column(Boolean, default=True, nullable=False)
     start_date = Column(Date, nullable=True, default=None)

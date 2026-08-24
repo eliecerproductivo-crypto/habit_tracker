@@ -26,7 +26,7 @@ def list_habits(
     return (
         db.query(models.Habit)
         .filter(models.Habit.user_id == current_user.id)
-        .order_by(models.Habit.start_time)
+        .order_by(models.Habit.start_time.nulls_last())
         .all()
     )
 

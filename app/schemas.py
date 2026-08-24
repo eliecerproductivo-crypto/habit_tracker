@@ -40,8 +40,8 @@ class HabitBase(BaseModel):
         default="0,1,2,3,4,5,6",
         description="Comma-separated weekdays, 0=domingo ... 6=sábado",
     )
-    start_time: str = Field(pattern=TIME_RE)
-    end_time: str = Field(pattern=TIME_RE)
+    start_time: Optional[str] = Field(default=None, pattern=TIME_RE)
+    end_time: Optional[str] = Field(default=None, pattern=TIME_RE)
     is_active: bool = True
     start_date: Optional[date] = None
     recurrence_type: str = Field(default="weekly", pattern="^(weekly|interval|monthly)$")
