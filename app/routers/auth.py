@@ -15,6 +15,18 @@ from app.database import get_db
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+DEFAULT_CATEGORIES = ["Trabajo", "Estudio", "Salud", "Personal", "Organizar"]
+
+
+def seed_default_categories(user_id: int, db: Session):
+    """Inserta las categorías default para un usuario si aún no tiene ninguna."""
+    existing = db.query(models.Category).filter(models.Category.user_id == user_id).first()
+    if existing:
+        return
+    for name in DEFAULT_CATEGORIES:
+        db.add(models.Category(user_id=user_id, name=name))
+    db.commit()
+
 
 @router.post("/register", response_model=schemas.UserOut, status_code=status.HTTP_201_CREATED)
 def register(payload: schemas.UserCreate, db: Session = Depends(get_db)):
@@ -30,7 +42,18 @@ def register(payload: schemas.UserCreate, db: Session = Depends(get_db)):
     db.add(user)
     db.commit()
     db.refresh(user)
+    seed_default_categories(user.id, db)
     return user
+
+
+@router.post("/seed-categories", status_code=status.HTTP_204_NO_CONTENT)
+def seed_my_categories(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Siembra las categorías default para usuarios que ya existían antes de este cambio."""
+    seed_default_categories(current_user.id, db)
+    return None
 
 
 @router.post("/login", response_model=schemas.Token)

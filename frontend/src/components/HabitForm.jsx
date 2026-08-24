@@ -54,10 +54,22 @@ function CategorySelect({ value, onChange }) {
   };
 
   const handleDelete = async (cat) => {
-    if (cat.id < 0) return; // default — not in DB
-    await deleteCategory(cat.id);
-    if (value === cat.name) onChange("");
-    setConfirmDelete(null);
+    console.log("[DEBUG] handleDelete called", cat);
+    if (cat.id < 0) {
+      console.log("[DEBUG] cat.id < 0, abortando");
+      return;
+    }
+    try {
+      console.log("[DEBUG] llamando deleteCategory con id:", cat.id);
+      await deleteCategory(cat.id);
+      console.log("[DEBUG] deleteCategory OK");
+      if (value === cat.name) onChange("");
+    } catch (err) {
+      console.error("[DEBUG] Error en deleteCategory:", err?.response?.status, err?.response?.data, err);
+    } finally {
+      console.log("[DEBUG] setConfirmDelete(null)");
+      setConfirmDelete(null);
+    }
   };
 
   return (
@@ -85,12 +97,22 @@ function CategorySelect({ value, onChange }) {
                     </p>
                     <div className="flex gap-2">
                       <button type="button"
-                        onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); handleDelete(cat); }}
+                        onMouseDown={(e) => {
+                          console.log("[DEBUG] onMouseDown Sí, eliminar");
+                          e.stopPropagation();
+                          e.preventDefault();
+                          handleDelete(cat);
+                        }}
                         className="flex-1 rounded-lg bg-coral py-1 text-xs font-semibold text-white cursor-pointer">
                         Sí, eliminar
                       </button>
                       <button type="button"
-                        onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); setConfirmDelete(null); }}
+                        onMouseDown={(e) => {
+                          console.log("[DEBUG] onMouseDown Cancelar");
+                          e.stopPropagation();
+                          e.preventDefault();
+                          setConfirmDelete(null);
+                        }}
                         className="flex-1 rounded-lg border border-line py-1 text-xs font-medium text-ink-soft cursor-pointer">
                         Cancelar
                       </button>

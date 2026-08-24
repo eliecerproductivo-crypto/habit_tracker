@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import api from "../api/client";
 
-const DEFAULT_CATEGORIES = ["Trabajo", "Estudio", "Salud", "Personal", "Organizar"];
-
 export function useCategories() {
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -35,10 +33,5 @@ export function useCategories() {
     setCategories((prev) => prev.filter((c) => c.id !== id));
   };
 
-  // If user has no custom categories, show defaults
-  const displayCategories = categories.length > 0
-    ? categories
-    : DEFAULT_CATEGORIES.map((name, i) => ({ id: -(i + 1), name }));
-
-  return { categories, displayCategories, loading, addCategory, deleteCategory, refresh };
+  return { categories, displayCategories: categories, loading, addCategory, deleteCategory, refresh };
 }
