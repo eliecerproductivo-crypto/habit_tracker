@@ -34,6 +34,8 @@ else:
     # Serverless functions are short-lived: don't keep a persistent pool around
     # between invocations. Supabase's pooler (pgbouncer) handles pooling for us.
     engine_kwargs["poolclass"] = NullPool
+    # PgBouncer en transaction mode no soporta prepared statements de psycopg3
+    connect_args = {"prepare_threshold": None}
 
 engine = create_engine(DATABASE_URL, connect_args=connect_args, **engine_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
