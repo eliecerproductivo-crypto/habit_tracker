@@ -15,7 +15,7 @@ from app.auth import (
     verify_password,
 )
 from app.database import get_db
-from app.email import send_reset_email
+from app.mailer import send_reset_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
