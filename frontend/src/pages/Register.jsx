@@ -25,7 +25,11 @@ export default function Register() {
       await register(name, email, password);
       navigate("/");
     } catch (err) {
-      setError(err?.response?.data?.detail || "No se pudo crear la cuenta.");
+      const detail = err?.response?.data?.detail;
+      const msg = typeof detail === "string"
+        ? detail
+        : "No se pudo crear la cuenta.";
+      setError(msg);
     } finally {
       setLoading(false);
     }
