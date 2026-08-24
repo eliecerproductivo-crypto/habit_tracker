@@ -4,6 +4,8 @@ import { ThemeProvider } from "./context/ThemeContext";
 import AppShell from "./components/AppShell";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
 import Dashboard from "./pages/Dashboard";
 import Habits from "./pages/Habits";
 import Stats from "./pages/Stats";
@@ -50,6 +52,8 @@ function AppRoutes() {
           </PublicOnlyRoute>
         }
       />
+      <Route path="/recuperar" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route
         path="/"
         element={

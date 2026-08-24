@@ -1,6 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
+from pydantic import BaseModel, EmailStr
+import secrets
+from datetime import datetime, timedelta, timezone
 
 from app import models, schemas
 
@@ -9,9 +12,10 @@ from app.auth import (
     create_access_token,
     get_current_user,
     hash_password,
-    verify_password,   # <-- nuevo
+    verify_password,
 )
 from app.database import get_db
+from app.email import send_reset_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -115,5 +119,72 @@ def delete_me(
     current_user: models.User = Depends(get_current_user),
 ):
     db.delete(current_user)  # borra hábitos y logs en cascada
+    db.commit()
+    return None
+
+
+# ── Recuperación de contraseña ─────────────────────────────────────────────────
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
+@router.post("/forgot-password", status_code=status.HTTP_204_NO_CONTENT)
+def forgot_password(
+    payload: ForgotPasswordRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    user = db.query(models.User).filter(models.User.email == payload.email).first()
+    # Siempre respondemos 204 para no revelar si el correo existe o no
+    if not user:
+        return None
+
+    # Invalidar tokens anteriores sin usar
+    db.query(models.PasswordResetToken).filter(
+        models.PasswordResetToken.user_id == user.id,
+        models.PasswordResetToken.used == False,
+    ).update({"used": True})
+
+    token_value = secrets.token_urlsafe(32)
+    reset_token = models.PasswordResetToken(
+        user_id=user.id,
+        token=token_value,
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+    db.add(reset_token)
+    db.commit()
+
+    background_tasks.add_task(send_reset_email, user.email, user.name, token_value)
+    return None
+
+
+@router.post("/reset-password", status_code=status.HTTP_204_NO_CONTENT)
+def reset_password(
+    payload: ResetPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    reset_token = (
+        db.query(models.PasswordResetToken)
+        .filter(
+            models.PasswordResetToken.token == payload.token,
+            models.PasswordResetToken.used == False,
+        )
+        .first()
+    )
+
+    if not reset_token:
+        raise HTTPException(status_code=400, detail="El enlace no es válido.")
+
+    if reset_token.expires_at < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="El enlace ha expirado. Solicita uno nuevo.")
+
+    user = db.query(models.User).filter(models.User.id == reset_token.user_id).first()
+    user.hashed_password = hash_password(payload.new_password)
+    reset_token.used = True
     db.commit()
     return None
