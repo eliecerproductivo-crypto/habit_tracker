@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Sparkles, ChevronDown, ChevronUp, Trash2, BookOpen } from "lucide-react";
 import { useJournal } from "../hooks/useJournal";
 import { todayLocalISODate } from "../lib/schedule";
-import AIChat from "../components/AIChat";
 
 function formatDate(dateStr) {
   const d = new Date(dateStr + "T12:00:00");
@@ -68,11 +67,7 @@ function TodayEditor({ getEntry, saveEntry, deleteEntry }) {
       <div className="flex items-center justify-between">
         <span className="text-xs text-ink-faint">{text.length}/2000</span>
         <div className="flex items-center gap-2">
-          {saved && (
-            <span className="text-xs text-mint font-medium">
-              ¡Guardado!
-            </span>
-          )}
+          {saved && <span className="text-xs text-mint font-medium">¡Guardado!</span>}
           {error && <span className="text-xs text-coral">{error}</span>}
           <button
             onClick={handleSave}
@@ -124,10 +119,7 @@ function EntryCard({ entry, summary, onDelete }) {
 
       {open && (
         <div className="border-t border-line px-4 py-3 flex flex-col gap-3">
-          {/* Texto original */}
           <p className="text-sm text-ink-soft leading-relaxed whitespace-pre-wrap">{entry.content}</p>
-
-          {/* Resumen IA */}
           {summary && (
             <div className="rounded-lg bg-violet-soft px-3 py-2.5">
               <p className="text-[11px] font-semibold text-violet mb-1 flex items-center gap-1">
@@ -145,19 +137,9 @@ function EntryCard({ entry, summary, onDelete }) {
 
 // ── Página principal ───────────────────────────────────────────────────────────
 export default function Journal() {
-  const {
-    entries, summaries,
-    loading, error,
-    saveEntry, deleteEntry, getEntry,
-  } = useJournal();
+  const { entries, summaries, loading, error, saveEntry, deleteEntry, getEntry } = useJournal();
 
-  const [tab, setTab] = useState("diario"); // "diario" | "chat"
-
-  // Mapa de fecha → resumen para lookup rápido
-  const summaryByDate = Object.fromEntries(
-    summaries.map((s) => [s.date_from, s])
-  );
-
+  const summaryByDate = Object.fromEntries(summaries.map((s) => [s.date_from, s]));
   const pastEntries = entries.filter((e) => e.entry_date !== todayLocalISODate());
 
   return (
@@ -165,62 +147,34 @@ export default function Journal() {
       <div>
         <h1 className="text-lg font-semibold">Diario</h1>
         <p className="text-sm text-ink-soft mt-0.5">
-          Escribe tu reflexión del día y habla con tu coach IA.
+          Escribe tu reflexión del día. La IA la resume automáticamente.
         </p>
       </div>
 
-      {/* Tabs principales */}
-      <div className="flex rounded-lg border border-line overflow-hidden">
-        {[
-          { key: "diario", label: "✏️  Diario" },
-          { key: "chat",   label: "✨  Chat IA" },
-        ].map(({ key, label }) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setTab(key)}
-            className={[
-              "flex-1 py-2.5 text-sm font-semibold transition-colors cursor-pointer",
-              tab === key ? "bg-signal text-panel" : "bg-panel-alt text-ink-faint hover:text-ink",
-            ].join(" ")}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <TodayEditor getEntry={getEntry} saveEntry={saveEntry} deleteEntry={deleteEntry} />
 
-      {tab === "chat" ? (
-        <AIChat />
+      {loading ? (
+        <p className="text-sm text-ink-soft">Cargando…</p>
+      ) : error ? (
+        <p className="rounded-lg bg-coral-soft px-3 py-2 text-sm text-coral">{error}</p>
+      ) : pastEntries.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 py-10 text-center">
+          <BookOpen size={32} className="text-ink-faint" />
+          <p className="text-sm text-ink-soft">Aún no hay entradas anteriores.</p>
+          <p className="text-xs text-ink-faint">Escribe tu primera reflexión arriba.</p>
+        </div>
       ) : (
-        <>
-          {/* Editor de hoy */}
-          <TodayEditor getEntry={getEntry} saveEntry={saveEntry} deleteEntry={deleteEntry} />
-
-          {/* Historial */}
-          {loading ? (
-            <p className="text-sm text-ink-soft">Cargando…</p>
-          ) : error ? (
-            <p className="rounded-lg bg-coral-soft px-3 py-2 text-sm text-coral">{error}</p>
-          ) : pastEntries.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 py-10 text-center">
-              <BookOpen size={32} className="text-ink-faint" />
-              <p className="text-sm text-ink-soft">Aún no hay entradas anteriores.</p>
-              <p className="text-xs text-ink-faint">Escribe tu primera reflexión arriba.</p>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-3">
-              <h2 className="text-sm font-semibold text-ink-soft">Historial</h2>
-              {pastEntries.map((entry) => (
-                <EntryCard
-                  key={entry.id}
-                  entry={entry}
-                  summary={summaryByDate[entry.entry_date] || null}
-                  onDelete={deleteEntry}
-                />
-              ))}
-            </div>
-          )}
-        </>
+        <div className="flex flex-col gap-3">
+          <h2 className="text-sm font-semibold text-ink-soft">Historial</h2>
+          {pastEntries.map((entry) => (
+            <EntryCard
+              key={entry.id}
+              entry={entry}
+              summary={summaryByDate[entry.entry_date] || null}
+              onDelete={deleteEntry}
+            />
+          ))}
+        </div>
       )}
     </div>
   );
