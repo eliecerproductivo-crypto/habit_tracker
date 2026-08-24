@@ -1,6 +1,25 @@
 import { useEffect, useRef, useState } from "react";
-import { Send, Sparkles, Bot, User } from "lucide-react";
+import { Send, Sparkles, Bot, User, Trash2 } from "lucide-react";
 import api from "../api/client";
+
+const SESSION_KEY = "rutina_chat_history";
+
+function loadHistory() {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(history) {
+  try {
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(history));
+  } catch {
+    // sessionStorage lleno o no disponible — ignorar
+  }
+}
 
 function Message({ role, content }) {
   const isUser = role === "user";
@@ -53,11 +72,16 @@ const SUGGESTIONS = [
 ];
 
 export default function AIChat() {
-  const [history, setHistory] = useState([]);
+  const [history, setHistory] = useState(() => loadHistory());
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const bottomRef = useRef(null);
+
+  // Persistir historial en sessionStorage cada vez que cambia
+  useEffect(() => {
+    saveHistory(history);
+  }, [history]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -97,10 +121,19 @@ export default function AIChat() {
         <div className="flex h-7 w-7 items-center justify-center rounded-full bg-violet-soft text-violet">
           <Sparkles size={14} />
         </div>
-        <div>
+        <div className="flex-1">
           <p className="text-sm font-semibold text-ink">Coach IA</p>
           <p className="text-xs text-ink-faint">Basado en tu diario de los últimos 7 días</p>
         </div>
+        {history.length > 0 && (
+          <button
+            onClick={() => { setHistory([]); sessionStorage.removeItem(SESSION_KEY); }}
+            title="Limpiar conversación"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-ink-faint hover:bg-coral-soft hover:text-coral transition-colors cursor-pointer"
+          >
+            <Trash2 size={14} />
+          </button>
+        )}
       </div>
 
       {/* Messages */}

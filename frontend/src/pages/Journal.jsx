@@ -69,9 +69,8 @@ function TodayEditor({ getEntry, saveEntry, deleteEntry }) {
         <span className="text-xs text-ink-faint">{text.length}/2000</span>
         <div className="flex items-center gap-2">
           {saved && (
-            <span className="flex items-center gap-1 text-xs text-mint font-medium">
-              <Sparkles size={12} />
-              Guardado — la IA lo está resumiendo…
+            <span className="text-xs text-mint font-medium">
+              ¡Guardado!
             </span>
           )}
           {error && <span className="text-xs text-coral">{error}</span>}
