@@ -101,6 +101,27 @@ def _call_with_fallback(messages: list[dict], max_tokens: int = 500) -> Optional
     return None
 
 
+def summarize_bio(bio_text: str) -> Optional[str]:
+    """
+    Extrae un perfil de contexto comprimido de la bio del usuario.
+    Elimina relleno y deja solo lo útil para la IA coach.
+    """
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Eres un extractor de contexto personal. Tu tarea es leer la autobiografía de un usuario "
+                "y producir un perfil comprimido (máximo 150 palabras) en español en tercera persona. "
+                "Extrae únicamente: nombre, objetivos de vida, áreas de interés, valores, estilo de vida. "
+                "Elimina todo lo que no sea relevante para un coach personal. "
+                "Sé concreto y neutro. No agregues opiniones ni consejos."
+            ),
+        },
+        {"role": "user", "content": bio_text},
+    ]
+    return _call_with_fallback(messages, max_tokens=250)
+
+
 def summarize_entries(entries_text: str) -> Optional[str]:
     """Resume una entrada de diario. Retorna el resumen o None si falla."""
     messages = [
@@ -124,13 +145,17 @@ def chat_with_context(
     history: list[dict],
     habits_text: str = "",
     stats: dict | None = None,
+    bio_summary: str | None = None,
 ) -> Optional[str]:
     """
-    Responde al usuario usando hábitos, estadísticas y resúmenes del diario como contexto.
+    Responde al usuario usando perfil personal, hábitos, estadísticas
+    y resúmenes del diario como contexto.
     """
     diary_block = "\n\n".join(
         f"- {s}" for s in context_summaries
     ) if context_summaries else "Sin entradas de diario aún."
+
+    bio_block = f"\n\nPERFIL DEL USUARIO:\n{bio_summary}" if bio_summary else ""
 
     stats_block = ""
     if stats:
@@ -147,12 +172,13 @@ def chat_with_context(
     system_prompt = (
         "Eres un coach personal de hábitos y productividad. "
         "Tu objetivo es ayudar al usuario a entender sus patrones, mejorar su rutina y superar bloqueos. "
-        "Usa el contexto completo (hábitos, estadísticas y diario) para dar respuestas personalizadas y concretas. "
+        "Usa el contexto completo (perfil, hábitos, estadísticas y diario) para dar respuestas personalizadas y concretas. "
         "Responde siempre en español, de forma empática pero directa. "
         "Máximo 200 palabras por respuesta. "
         "IMPORTANTE: responde en texto plano, sin markdown, sin asteriscos, sin almohadillas, sin guiones como viñetas. "
         "Escribe en párrafos normales como si fuera una conversación.\n\n"
         f"RESÚMENES DEL DIARIO (últimos días):\n{diary_block}"
+        f"{bio_block}"
         f"{habits_block}"
         f"{stats_block}"
     )

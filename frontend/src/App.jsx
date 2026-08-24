@@ -12,6 +12,7 @@ import Stats from "./pages/Stats";
 import Friends from "./pages/Friends";
 import Journal from "./pages/Journal";
 import Coach from "./pages/Coach";
+import Profile from "./pages/Profile";
 
 function FullScreenLoader() {
   return (
@@ -101,6 +102,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <Coach />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/perfil-ia"
+        element={
+          <ProtectedRoute>
+            <Profile />
           </ProtectedRoute>
         }
       />

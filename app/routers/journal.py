@@ -259,6 +259,14 @@ def chat(
     from datetime import date, timedelta
     from collections import defaultdict
 
+    # ── Perfil del usuario (bio resumida) ────────────────────────────────────
+    user_profile = (
+        db.query(models.UserProfile)
+        .filter(models.UserProfile.user_id == current_user.id)
+        .first()
+    )
+    bio_summary = user_profile.bio_summary if user_profile and user_profile.bio_summary else None
+
     # ── Resúmenes del diario (últimos 7) ──────────────────────────────────────
     recent_summaries = (
         db.query(models.JournalSummary)
@@ -362,6 +370,7 @@ def chat(
             "habitos_activos": len(habits),
         },
         history=history,
+        bio_summary=bio_summary,
     )
 
     if not reply:

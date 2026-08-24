@@ -140,3 +140,18 @@ class JournalSummary(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     owner = relationship("User", foreign_keys=[user_id])
+
+
+class UserProfile(Base):
+    __tablename__ = "user_profiles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False, index=True)
+    # Texto libre escrito por el usuario (bio, objetivos, intereses, valores)
+    bio = Column(String(5000), nullable=False, default="")
+    # Versión comprimida generada por IA — solo lo útil para contexto
+    bio_summary = Column(String(1000), nullable=True, default=None)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc))
+
+    owner = relationship("User", foreign_keys=[user_id])
