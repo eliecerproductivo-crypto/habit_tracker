@@ -4,6 +4,7 @@ import axios from "axios";
 // In production on Vercel, /api resolves to the serverless functions in /api.
 const api = axios.create({
   baseURL: "/api",
+  timeout: 30000, // 30s para tolerar cold starts de Vercel
 });
 
 const TOKEN_KEY = "habit_tracker_token";
@@ -33,6 +34,7 @@ export function setUnauthorizedHandler(fn) {
 api.interceptors.response.use(
   (res) => res,
   (error) => {
+    // Solo cerrar sesión en 401 real, no en timeouts o errores de red
     if (error?.response?.status === 401) {
       setToken(null);
       if (onUnauthorized) onUnauthorized();

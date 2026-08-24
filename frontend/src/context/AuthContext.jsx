@@ -16,8 +16,12 @@ export function AuthProvider({ children }) {
     try {
       const res = await api.get("/auth/me");
       setUser(res.data);
-    } catch {
-      setUser(null);
+    } catch (err) {
+      // Solo limpiar sesión en 401, no en timeouts u otros errores de red
+      if (err?.response?.status === 401) {
+        setToken(null);
+        setUser(null);
+      }
     } finally {
       setLoading(false);
     }
