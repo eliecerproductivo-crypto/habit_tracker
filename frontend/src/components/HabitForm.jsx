@@ -55,20 +55,13 @@ function CategorySelect({ value, onChange }) {
   };
 
   const handleDelete = async (cat) => {
-    console.log("[DEBUG] handleDelete called", cat);
-    if (cat.id < 0) {
-      console.log("[DEBUG] cat.id < 0, abortando");
-      return;
-    }
+    if (cat.id < 0) return;
     try {
-      console.log("[DEBUG] llamando deleteCategory con id:", cat.id);
       await deleteCategory(cat.id);
-      console.log("[DEBUG] deleteCategory OK");
       if (value === cat.name) onChange("");
     } catch (err) {
-      console.error("[DEBUG] Error en deleteCategory:", err?.response?.status, err?.response?.data, err);
+      console.error("Error eliminando categoría:", err?.response?.status, err?.response?.data);
     } finally {
-      console.log("[DEBUG] setConfirmDelete(null)");
       setConfirmDelete(null);
     }
   };
@@ -99,7 +92,6 @@ function CategorySelect({ value, onChange }) {
                     <div className="flex gap-2">
                       <button type="button"
                         onMouseDown={(e) => {
-                          console.log("[DEBUG] onMouseDown Sí, eliminar");
                           e.stopPropagation();
                           e.preventDefault();
                           handleDelete(cat);
@@ -109,7 +101,6 @@ function CategorySelect({ value, onChange }) {
                       </button>
                       <button type="button"
                         onMouseDown={(e) => {
-                          console.log("[DEBUG] onMouseDown Cancelar");
                           e.stopPropagation();
                           e.preventDefault();
                           setConfirmDelete(null);

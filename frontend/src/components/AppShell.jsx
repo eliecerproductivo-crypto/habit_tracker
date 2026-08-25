@@ -16,14 +16,14 @@ import { useFriends } from "../hooks/useFriends";
 const PRIMARY_NAV = [
   { to: "/", label: "Hoy", icon: LayoutGrid, end: true },
   { to: "/habitos", label: "Hábitos", icon: ListChecks },
-  { to: "/estadisticas", label: "Stats", icon: BarChart3 },
-  { to: "/amigos", label: "Amigos", icon: Users },
+  { to: "/diario", label: "Diario", icon: BookOpen },
+  { to: "/coach", label: "Coach IA", icon: Sparkles },
 ];
 
 // Items secundarios en el drawer "más"
 const SECONDARY_NAV = [
-  { to: "/diario", label: "Diario", icon: BookOpen },
-  { to: "/coach", label: "Coach IA", icon: Sparkles },
+  { to: "/estadisticas", label: "Estadísticas", icon: BarChart3 },
+  { to: "/amigos", label: "Amigos", icon: Users },
   { to: "/perfil-ia", label: "Mi perfil IA", icon: UserCircle },
 ];
 
