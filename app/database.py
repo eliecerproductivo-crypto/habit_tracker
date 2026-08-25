@@ -102,6 +102,16 @@ def _migrate(connection):
                 "ALTER TABLE habits ADD COLUMN duration_minutes INTEGER DEFAULT NULL"
             ))
 
+    # ── categories: unique constraint (user_id, name) ─────────────────────────
+    if "categories" in tables:
+        dialect = connection.dialect.name
+        if dialect == "postgresql":
+            connection.execute(text(
+                "DO $$ BEGIN "
+                "IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_category_user_name') "
+                "THEN ALTER TABLE categories ADD CONSTRAINT uq_category_user_name UNIQUE (user_id, name); "
+                "END IF; END $$;"
+            ))
 
 def init_db():
     # Creates tables if they don't exist yet, then applies pending migrations.

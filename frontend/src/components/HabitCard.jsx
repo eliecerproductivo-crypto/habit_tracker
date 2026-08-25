@@ -57,21 +57,33 @@ export default function HabitCard({ habit, onEdit, onDelete }) {
         </span>
       </div>
 
-      <div className="flex gap-1">
-        {DAY_LABELS.map((label, i) => (
-          <span
-            key={i}
-            className={[
-              "flex h-6 w-6 items-center justify-center rounded-md text-[10px] font-semibold",
-              days.includes(i)
-                ? "bg-ink text-bg"
-                : "bg-panel-alt text-ink-faint",
-            ].join(" ")}
-          >
-            {label[0]}
-          </span>
-        ))}
-      </div>
+      {habit.recurrence_type === "weekly" || !habit.recurrence_type ? (
+        <div className="flex gap-1">
+          {DAY_LABELS.map((label, i) => (
+            <span
+              key={i}
+              className={[
+                "flex h-6 w-6 items-center justify-center rounded-md text-[10px] font-semibold",
+                days.includes(i)
+                  ? "bg-ink text-bg"
+                  : "bg-panel-alt text-ink-faint",
+              ].join(" ")}
+            >
+              {label[0]}
+            </span>
+          ))}
+        </div>
+      ) : habit.recurrence_type === "interval" ? (
+        <p className="text-xs text-ink-faint">
+          Cada {habit.recurrence_interval} {habit.recurrence_interval === 1 ? "día" : "días"}
+        </p>
+      ) : habit.recurrence_type === "monthly" ? (
+        <p className="text-xs text-ink-faint">
+          {habit.recurrence_day_of_month === -1
+            ? "Último día del mes"
+            : `Día ${habit.recurrence_day_of_month} de cada mes`}
+        </p>
+      ) : null}
     </div>
   );
 }

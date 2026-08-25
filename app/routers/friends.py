@@ -20,45 +20,95 @@ def get_friendship(db, user_id: int, other_id: int):
 
 
 def compute_stats(db: Session, user: models.User) -> dict:
-    logs = db.query(models.HabitLog).filter(
-        models.HabitLog.user_id == user.id,
-        models.HabitLog.status == "done",
-    ).all()
+    """
+    Compute streak, week_completion_rate, and total_completed for a user.
+    Uses the same logic as stats.py:
+    - Days convention: JS getDay() (0=Sunday..6=Saturday), stored as comma-separated string.
+    - A habit only counts on a day if day >= habit.start_date (or start_date is None).
+    - Skipped is neutral (excluded from both numerator and denominator of week rate).
+    - Streak: consecutive days where ALL scheduled habits are done or skipped.
+    - Week rate: last 6 completed days (today excluded, day not finished yet).
+    """
+    from collections import defaultdict
 
-    total_completed = len(logs)
-
-    # Week completion rate
     today = date.today()
-    week_start = today - timedelta(days=today.weekday())
-    week_logs = [l for l in logs if l.date >= week_start]
+    MAX_LOOKBACK = 365
+
     habits = db.query(models.Habit).filter(
         models.Habit.user_id == user.id,
-        models.Habit.is_active == True,
+        models.Habit.is_active.is_(True),
     ).all()
-    week_days = [(week_start + timedelta(days=i)) for i in range(7) if (week_start + timedelta(days=i)) <= today]
-    total_slots = sum(
-        1 for h in habits for d in week_days
-        if str(d.weekday()) in h.days_of_week.split(",") or h.recurrence_type != "weekly"
-    )
-    week_completion_rate = round(len(week_logs) / total_slots * 100) if total_slots > 0 else 0
 
-    # Current streak (consecutive days with at least one done log)
-    log_dates = sorted({l.date for l in logs}, reverse=True)
-    streak = 0
-    check = today
-    for d in log_dates:
-        if d == check:
-            streak += 1
-            check -= timedelta(days=1)
-        elif d < check:
+    all_logs = db.query(models.HabitLog).filter(
+        models.HabitLog.user_id == user.id,
+    ).all()
+
+    total_completed = sum(1 for lg in all_logs if lg.status == "done")
+
+    # Build lookup: date -> habit_id -> status
+    status_by_date: dict = defaultdict(dict)
+    for lg in all_logs:
+        status_by_date[lg.date][lg.habit_id] = lg.status
+
+    # Build lookup: weekday (0-6 JS convention) -> [habits]
+    habits_by_weekday: dict = defaultdict(list)
+    for h in habits:
+        for wd_str in h.days_of_week.split(","):
+            wd_str = wd_str.strip()
+            if wd_str.isdigit():
+                habits_by_weekday[int(wd_str)].append(h)
+
+    def day_status(d):
+        """True=all done/skipped, False=at least one missing, None=nothing scheduled."""
+        wd = d.isoweekday() % 7  # 0=Sun..6=Sat matching JS getDay()
+        all_sched = habits_by_weekday.get(wd, [])
+        sched = [h for h in all_sched if not (h.start_date and d < h.start_date)]
+        if not sched:
+            return None
+        day_logs = status_by_date.get(d, {})
+        for h in sched:
+            s = day_logs.get(h.id)
+            if s in ("done", "skipped"):
+                continue
+            return False
+        return True
+
+    # Current streak (walk backwards from today)
+    current_streak = 0
+    cursor = today
+    for _ in range(MAX_LOOKBACK):
+        st = day_status(cursor)
+        if st is None:
+            cursor -= timedelta(days=1)
+            continue
+        if st is True:
+            current_streak += 1
+            cursor -= timedelta(days=1)
+        else:
             break
 
+    # Week completion rate: last 6 days (today excluded)
+    week_scheduled = 0
+    week_done = 0
+    for i in range(1, 7):
+        d = today - timedelta(days=i)
+        wd = d.isoweekday() % 7
+        for h in habits_by_weekday.get(wd, []):
+            if h.start_date and d < h.start_date:
+                continue
+            s = status_by_date.get(d, {}).get(h.id)
+            if s == "skipped":
+                continue
+            week_scheduled += 1
+            if s == "done":
+                week_done += 1
+    week_completion_rate = round((week_done / week_scheduled) * 100) if week_scheduled else 0
+
     return {
-        "current_streak": streak,
+        "current_streak": current_streak,
         "week_completion_rate": week_completion_rate,
         "total_completed": total_completed,
     }
-
 
 @router.post("/request", status_code=status.HTTP_201_CREATED)
 def send_request(

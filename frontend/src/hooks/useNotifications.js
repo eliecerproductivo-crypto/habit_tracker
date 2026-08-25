@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { parseDays, toMinutes } from "../lib/schedule";
+import { habitOccursOnDate, toLocalISODate, toMinutes } from "../lib/schedule";
 
 const STORAGE_KEY = "rutina_notif_minutes";
 const DEFAULT_MINUTES = 15;
@@ -90,13 +90,13 @@ export function useNotifications(habits) {
 
     const check = () => {
       const now = new Date();
-      const day = now.getDay();
+      const isoDate = toLocalISODate(now);
       const nowMinutes = now.getHours() * 60 + now.getMinutes();
       const dateKey = now.toISOString().slice(0, 10);
 
       habits.forEach((habit) => {
         if (habit.is_active === false) return;
-        if (!parseDays(habit.days_of_week).includes(day)) return;
+        if (!habitOccursOnDate(habit, isoDate)) return;
 
         const start = toMinutes(habit.start_time);
         if (start == null) return;

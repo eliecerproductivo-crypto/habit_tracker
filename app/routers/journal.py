@@ -327,17 +327,29 @@ def chat(
     ).all()
     total_done = sum(1 for l in all_logs if l.status == "done")
 
-    # Racha actual (simplificada)
+    # Racha actual - misma logica que stats.py:
+    # solo contar dias donde TODOS los habitos (que existian ese dia) son done/skipped.
+    habits_by_wd_chat: dict = {}
+    for h in habits:
+        for wd_str in h.days_of_week.split(","):
+            wd_str = wd_str.strip()
+            if wd_str.isdigit():
+                wd_int = int(wd_str)
+                habits_by_wd_chat.setdefault(wd_int, []).append(h)
+
     streak = 0
-    for i in range(365):
-        d = today - timedelta(days=i)
-        wd = d.isoweekday() % 7
-        scheduled = [h for h in habits if wd in [int(x) for x in h.days_of_week.split(",") if x.strip()]]
-        if not scheduled:
+    cursor_d = today
+    for _ in range(365):
+        wd = cursor_d.isoweekday() % 7
+        all_sched = habits_by_wd_chat.get(wd, [])
+        sched = [h for h in all_sched if not (h.start_date and cursor_d < h.start_date)]
+        if not sched:
+            cursor_d -= timedelta(days=1)
             continue
-        day_logs = {log.habit_id: log.status for log in all_logs if log.date == d}
-        if all(day_logs.get(h.id) in ("done", "skipped") for h in scheduled):
+        day_logs_map = {lg.habit_id: lg.status for lg in all_logs if lg.date == cursor_d}
+        if all(day_logs_map.get(h.id) in ("done", "skipped") for h in sched):
             streak += 1
+            cursor_d -= timedelta(days=1)
         else:
             break
 

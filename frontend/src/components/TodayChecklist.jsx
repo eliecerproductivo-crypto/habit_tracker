@@ -73,9 +73,13 @@ export default function TodayChecklist({ habits, logsByHabitId = {}, onSetStatus
               ].join(" ")}>
                 {habit.name}
               </p>
-              <p className="font-mono text-xs text-ink-faint tabular">
-                {formatTime(habit.start_time)} – {formatTime(habit.end_time)}
-              </p>
+              {habit.start_time ? (
+                <p className="font-mono text-xs text-ink-faint tabular">
+                  {formatTime(habit.start_time)} – {formatTime(habit.end_time)}
+                </p>
+              ) : habit.duration_minutes ? (
+                <p className="text-xs text-ink-faint">{habit.duration_minutes} min</p>
+              ) : null}
             </div>
 
             {/* Status buttons — ocultos en fechas futuras */}

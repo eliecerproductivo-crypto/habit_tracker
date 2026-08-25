@@ -41,21 +41,27 @@ def _load_context(db: Session, user: models.User):
 
 def _day_status(d: date_type, habits_by_weekday, status_by_date) -> bool | None:
     """
-    True  = all scheduled habits are done or skipped (skipped = neutral, doesn't break streak)
-    False = at least one habit failed or has no log at all
-    None  = nothing scheduled that day
+    True  = all scheduled habits (that existed on d) are done or skipped.
+    False = at least one habit failed or has no log.
+    None  = nothing scheduled that day (or all habits started after d).
+
+    A habit is only counted if d >= habit.start_date (or start_date is None).
+    skipped is neutral: excluded from both sides of the check.
     """
-    weekday = d.isoweekday() % 7  # 0=domingo ... 6=sábado (matches JS Date#getDay())
-    scheduled = habits_by_weekday.get(weekday, [])
+    weekday = d.isoweekday() % 7  # 0=domingo ... 6=sabado (matches JS Date#getDay())
+    all_scheduled = habits_by_weekday.get(weekday, [])
+
+    # Filter out habits that had not started yet on date d
+    scheduled = [h for h in all_scheduled if not (h.start_date and d < h.start_date)]
     if not scheduled:
         return None
 
     day_logs = status_by_date.get(d, {})
     for h in scheduled:
         s = day_logs.get(h.id)
-        if s == "done" or s == "skipped":
-            continue  # ok — done counts, skipped is neutral
-        # failed or no log → day is broken
+        if s == 'done' or s == 'skipped':
+            continue  # ok
+        # failed or no log -> day is broken
         return False
     return True
 
@@ -135,12 +141,17 @@ def weekly(db: Session = Depends(get_db), current_user: models.User = Depends(ge
     for i in range(6, -1, -1):
         d = today - timedelta(days=i)
         weekday = d.isoweekday() % 7
-        scheduled = habits_by_weekday.get(weekday, [])
+        all_scheduled = habits_by_weekday.get(weekday, [])
         day_logs = status_by_date.get(d, {})
 
-        # skipped habits are excluded from both counts (neutral)
-        effective = [h for h in scheduled if day_logs.get(h.id) != "skipped"]
-        completed_count = sum(1 for h in effective if day_logs.get(h.id) == "done")
+        # Exclude habits that had not started yet on this day.
+        # Exclude skipped habits (neutral - not counted on either side).
+        effective = [
+            h for h in all_scheduled
+            if not (h.start_date and d < h.start_date)
+            and day_logs.get(h.id) != 'skipped'
+        ]
+        completed_count = sum(1 for h in effective if day_logs.get(h.id) == 'done')
 
         result.append(
             schemas.WeeklyStat(
