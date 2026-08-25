@@ -159,12 +159,15 @@ def chat_with_context(
 
     stats_block = ""
     if stats:
+        nota = stats.get("nota_temporal")
+        nota_line = f"\n  ⚠ {nota}" if nota else ""
         stats_block = (
             f"\n\nESTADÍSTICAS:\n"
             f"  • Racha actual: {stats.get('racha_actual', 0)} días\n"
             f"  • Cumplimiento esta semana: {stats.get('cumplimiento_semana', '0%')}\n"
             f"  • Hábitos activos: {stats.get('habitos_activos', 0)}\n"
             f"  • Total completados (histórico): {stats.get('total_completados_historico', 0)}"
+            f"{nota_line}"
         )
 
     habits_block = f"\n\nHÁBITOS ACTIVOS:\n{habits_text}" if habits_text else ""
@@ -176,7 +179,9 @@ def chat_with_context(
         "Responde siempre en español, de forma empática pero directa. "
         "Sé conciso: cada palabra debe aportar valor. Elimina relleno, repeticiones y frases obvias. "
         "Si la respuesta puede ser corta sin perder sustancia, que sea corta. Si necesita más detalle, dalo, pero sin paja. "
-        "Texto plano, sin markdown, sin asteriscos, sin almohadillas, sin viñetas. Párrafos normales.\n\n"
+        "Texto plano, sin markdown, sin asteriscos, sin almohadillas, sin viñetas. Párrafos normales. "
+        "IMPORTANTE: si las estadísticas incluyen una nota temporal (usuario nuevo o hábitos recientes), "
+        "NO uses el porcentaje de cumplimiento para hacer juicios negativos — es demasiado pronto para evaluar tendencias.\n\n"
         f"RESÚMENES DEL DIARIO (últimos días):\n{diary_block}"
         f"{bio_block}"
         f"{habits_block}"

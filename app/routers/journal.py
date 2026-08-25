@@ -342,13 +342,20 @@ def chat(
             break
 
     # Tasa de cumplimiento de la semana
+    # - Hoy se excluye: el dia no ha terminado, los habitos pendientes bajan el % injustamente.
+    # - Solo cuentan dias >= start_date del habito.
+    # - Skipped se excluye de numerador y denominador.
     week_scheduled = week_done = 0
     for d in week_dates:
+        if d == today:
+            continue  # excluir hoy
         wd = d.isoweekday() % 7
         for h in habits:
             days_set = {int(x) for x in h.days_of_week.split(",") if x.strip()}
             if wd not in days_set:
                 continue
+            if h.start_date and d < h.start_date:
+                continue  # habito no existia ese dia
             status = log_map.get(h.id, {}).get(d)
             if status == "skipped":
                 continue
@@ -356,6 +363,14 @@ def chat(
             if status == "done":
                 week_done += 1
     week_rate = round((week_done / week_scheduled) * 100) if week_scheduled else 0
+
+    # Contexto temporal para la IA: cuantos dias han pasado desde que inicio el habito mas reciente
+    newest_habit_date = None
+    for h in habits:
+        effective_start = h.start_date or h.created_at.date()
+        if newest_habit_date is None or effective_start > newest_habit_date:
+            newest_habit_date = effective_start
+    days_since_newest = (today - newest_habit_date).days if newest_habit_date else None
 
     history = [{"role": m.role, "content": m.content} for m in payload.history]
 
@@ -365,9 +380,14 @@ def chat(
         habits_text="\n".join(habits_lines) if habits_lines else "Sin hábitos registrados.",
         stats={
             "racha_actual": streak,
-            "cumplimiento_semana": f"{week_rate}%",
+            "cumplimiento_semana": f"{week_rate}%" if week_scheduled else "Sin datos aún (hábitos muy recientes)",
             "total_completados_historico": total_done,
             "habitos_activos": len(habits),
+            "dias_desde_inicio": days_since_newest,
+            "nota_temporal": (
+                f"El usuario lleva solo {days_since_newest} día(s) usando la app. "
+                "No evalúes el cumplimiento como si fuera una tendencia consolidada."
+            ) if days_since_newest is not None and days_since_newest < 7 else None,
         },
         history=history,
         bio_summary=bio_summary,

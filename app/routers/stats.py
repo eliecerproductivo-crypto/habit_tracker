@@ -93,17 +93,24 @@ def summary(db: Session = Depends(get_db), current_user: models.User = Depends(g
         cursor += timedelta(days=1)
     best_streak = max(best_streak, current_streak)
 
-    # --- last 7 days completion rate (only done counts, skipped excluded from denominator) ---
+    # --- last 7 days completion rate ---
+    # Rules:
+    #   - Today is excluded: the day has not ended so pending habits unfairly reduce the rate.
+    #   - A habit only counts for a day if that day >= habit.start_date (or start_date is None).
+    #   - Skipped habits are excluded from both numerator and denominator (neutral).
     total_scheduled = 0
     total_done = 0
-    for i in range(7):
+    for i in range(1, 7):  # i=1..6 -> yesterday back to 6 days ago (today excluded)
         d = today - timedelta(days=i)
         scheduled = habits_by_weekday.get(d.isoweekday() % 7, [])
         day_logs = status_by_date.get(d, {})
         for h in scheduled:
+            # Skip days before this habit existed
+            if h.start_date and d < h.start_date:
+                continue
             s = day_logs.get(h.id)
             if s == "skipped":
-                continue  # don't count skipped in either numerator or denominator
+                continue
             total_scheduled += 1
             if s == "done":
                 total_done += 1
