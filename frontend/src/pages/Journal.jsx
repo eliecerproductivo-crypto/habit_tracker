@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Sparkles, ChevronDown, ChevronUp, Trash2, BookOpen } from "lucide-react";
 import { useJournal } from "../hooks/useJournal";
 import { todayLocalISODate } from "../lib/schedule";
@@ -9,13 +9,22 @@ function formatDate(dateStr) {
 }
 
 // ── Editor de la entrada de hoy ────────────────────────────────────────────────
-function TodayEditor({ getEntry, saveEntry, deleteEntry }) {
+function TodayEditor({ getEntry, saveEntry, deleteEntry, loading }) {
   const today = todayLocalISODate();
   const existing = getEntry(today);
-  const [text, setText] = useState(existing?.content || "");
+  const [text, setText] = useState("");
+  const [initialized, setInitialized] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
+
+  // Sincronizar cuando llega la entrada desde la BD (el fetch puede tardar)
+  useEffect(() => {
+    if (!loading && !initialized) {
+      setText(existing?.content || "");
+      setInitialized(true);
+    }
+  }, [loading, initialized, existing?.content]);
 
   const handleSave = async () => {
     if (!text.trim()) return;
@@ -151,7 +160,7 @@ export default function Journal() {
         </p>
       </div>
 
-      <TodayEditor getEntry={getEntry} saveEntry={saveEntry} deleteEntry={deleteEntry} />
+      <TodayEditor getEntry={getEntry} saveEntry={saveEntry} deleteEntry={deleteEntry} loading={loading} />
 
       {loading ? (
         <p className="text-sm text-ink-soft">Cargando…</p>
