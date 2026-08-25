@@ -67,6 +67,8 @@ class Habit(Base):
     recurrence_interval = Column(Integer, nullable=True, default=None)
     # day_of_month: 1-28 or -1 for last day (used when recurrence_type="monthly")
     recurrence_day_of_month = Column(Integer, nullable=True, default=None)
+    # duration in minutes for habits without a fixed time (e.g. "study 30 min any time")
+    duration_minutes = Column(Integer, nullable=True, default=None)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     owner = relationship("User", back_populates="habits")

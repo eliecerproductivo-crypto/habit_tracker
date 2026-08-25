@@ -94,6 +94,14 @@ def _migrate(connection):
                 "ALTER TABLE habits ALTER COLUMN end_time DROP NOT NULL"
             ))
 
+    # ── habits: duration_minutes (nueva columna) ───────────────────────────
+    if "habits" in tables:
+        habit_cols = {c["name"] for c in inspector.get_columns("habits")}
+        if "duration_minutes" not in habit_cols:
+            connection.execute(text(
+                "ALTER TABLE habits ADD COLUMN duration_minutes INTEGER DEFAULT NULL"
+            ))
+
 
 def init_db():
     # Creates tables if they don't exist yet, then applies pending migrations.

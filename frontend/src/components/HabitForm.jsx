@@ -11,6 +11,7 @@ const EMPTY = {
   has_time: false,
   start_time: "08:00",
   end_time: "09:00",
+  duration_minutes: "",
   start_date: "",
   recurrence_type: "weekly",
   recurrence_interval: 2,
@@ -159,6 +160,7 @@ export default function HabitForm({ initial, onSubmit, onCancel, submitLabel = "
       ...EMPTY,
       ...initial,
       has_time: !!(initial.start_time),
+      duration_minutes: initial.duration_minutes ? String(initial.duration_minutes) : "",
       days_of_week: Array.isArray(initial.days_of_week)
         ? initial.days_of_week
         : (initial.days_of_week || "").split(",").filter(Boolean).map(Number),
@@ -202,6 +204,7 @@ export default function HabitForm({ initial, onSubmit, onCancel, submitLabel = "
         ...form,
         start_time: form.has_time ? form.start_time : null,
         end_time: form.has_time ? form.end_time : null,
+        duration_minutes: !form.has_time && form.duration_minutes ? Number(form.duration_minutes) : null,
         days_of_week: form.recurrence_type === "weekly" ? form.days_of_week.join(",") : "0",
         recurrence_interval: form.recurrence_type === "interval" ? Number(form.recurrence_interval) : null,
         recurrence_day_of_month: form.recurrence_type === "monthly" ? Number(form.recurrence_day_of_month) : null,
@@ -276,7 +279,18 @@ export default function HabitForm({ initial, onSubmit, onCancel, submitLabel = "
           </div>
         )}
         {!form.has_time && (
-          <p className="mt-1 text-xs text-ink-faint">El hábito aparecerá sin horario asignado.</p>
+          <div className="mt-3 flex items-center gap-3">
+            <input
+              type="number"
+              min={1}
+              max={480}
+              value={form.duration_minutes}
+              onChange={(e) => set("duration_minutes", e.target.value)}
+              placeholder="30"
+              className="w-20 rounded-lg border border-line bg-bg px-3 py-2 text-center text-sm text-ink outline-none focus:border-signal"
+            />
+            <span className="text-sm text-ink-soft">minutos objetivo <span className="text-ink-faint">(opcional)</span></span>
+          </div>
         )}
       </div>
 

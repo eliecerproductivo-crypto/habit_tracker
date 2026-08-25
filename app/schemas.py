@@ -47,6 +47,7 @@ class HabitBase(BaseModel):
     recurrence_type: str = Field(default="weekly", pattern="^(weekly|interval|monthly)$")
     recurrence_interval: Optional[int] = Field(default=None, ge=1, le=365)
     recurrence_day_of_month: Optional[int] = Field(default=None, ge=-1, le=31)
+    duration_minutes: Optional[int] = Field(default=None, ge=1, le=480)
 
     @field_validator("days_of_week")
     @classmethod
