@@ -5,7 +5,7 @@ import StatCard from "../components/StatCard";
 import DateNavBar from "../components/DateNavBar";
 import { useHabits } from "../hooks/useHabits";
 import { useStats } from "../hooks/useStats";
-import { parseDays, todayLocalISODate, toLocalISODate, habitOccursOnDate } from "../lib/schedule";
+import { todayLocalISODate, toLocalISODate, habitOccursOnDate } from "../lib/schedule";
 
 export default function Dashboard() {
   const [selectedDate, setSelectedDate] = useState(todayLocalISODate());

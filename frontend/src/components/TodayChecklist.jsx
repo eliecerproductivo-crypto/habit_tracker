@@ -29,7 +29,14 @@ export default function TodayChecklist({ habits, logsByHabitId = {}, onSetStatus
 
   const todays = habits
     .filter((h) => h.is_active !== false && habitOccursOnDate(h, resolvedDate))
-    .sort((a, b) => toMinutes(a.start_time) - toMinutes(b.start_time));
+    .sort((a, b) => {
+      const aMin = toMinutes(a.start_time);
+      const bMin = toMinutes(b.start_time);
+      if (aMin == null && bMin == null) return 0;
+      if (aMin == null) return 1;
+      if (bMin == null) return -1;
+      return aMin - bMin;
+    });
 
   if (todays.length === 0) {
     return (

@@ -19,96 +19,7 @@ def get_friendship(db, user_id: int, other_id: int):
     ).first()
 
 
-def compute_stats(db: Session, user: models.User) -> dict:
-    """
-    Compute streak, week_completion_rate, and total_completed for a user.
-    Uses the same logic as stats.py:
-    - Days convention: JS getDay() (0=Sunday..6=Saturday), stored as comma-separated string.
-    - A habit only counts on a day if day >= habit.start_date (or start_date is None).
-    - Skipped is neutral (excluded from both numerator and denominator of week rate).
-    - Streak: consecutive days where ALL scheduled habits are done or skipped.
-    - Week rate: last 6 completed days (today excluded, day not finished yet).
-    """
-    from collections import defaultdict
-
-    today = date.today()
-    MAX_LOOKBACK = 365
-
-    habits = db.query(models.Habit).filter(
-        models.Habit.user_id == user.id,
-        models.Habit.is_active.is_(True),
-    ).all()
-
-    all_logs = db.query(models.HabitLog).filter(
-        models.HabitLog.user_id == user.id,
-    ).all()
-
-    total_completed = sum(1 for lg in all_logs if lg.status == "done")
-
-    # Build lookup: date -> habit_id -> status
-    status_by_date: dict = defaultdict(dict)
-    for lg in all_logs:
-        status_by_date[lg.date][lg.habit_id] = lg.status
-
-    # Build lookup: weekday (0-6 JS convention) -> [habits]
-    habits_by_weekday: dict = defaultdict(list)
-    for h in habits:
-        for wd_str in h.days_of_week.split(","):
-            wd_str = wd_str.strip()
-            if wd_str.isdigit():
-                habits_by_weekday[int(wd_str)].append(h)
-
-    def day_status(d):
-        """True=all done/skipped, False=at least one missing, None=nothing scheduled."""
-        wd = d.isoweekday() % 7  # 0=Sun..6=Sat matching JS getDay()
-        all_sched = habits_by_weekday.get(wd, [])
-        sched = [h for h in all_sched if not (h.start_date and d < h.start_date)]
-        if not sched:
-            return None
-        day_logs = status_by_date.get(d, {})
-        for h in sched:
-            s = day_logs.get(h.id)
-            if s in ("done", "skipped"):
-                continue
-            return False
-        return True
-
-    # Current streak (walk backwards from today)
-    current_streak = 0
-    cursor = today
-    for _ in range(MAX_LOOKBACK):
-        st = day_status(cursor)
-        if st is None:
-            cursor -= timedelta(days=1)
-            continue
-        if st is True:
-            current_streak += 1
-            cursor -= timedelta(days=1)
-        else:
-            break
-
-    # Week completion rate: last 6 days (today excluded)
-    week_scheduled = 0
-    week_done = 0
-    for i in range(1, 7):
-        d = today - timedelta(days=i)
-        wd = d.isoweekday() % 7
-        for h in habits_by_weekday.get(wd, []):
-            if h.start_date and d < h.start_date:
-                continue
-            s = status_by_date.get(d, {}).get(h.id)
-            if s == "skipped":
-                continue
-            week_scheduled += 1
-            if s == "done":
-                week_done += 1
-    week_completion_rate = round((week_done / week_scheduled) * 100) if week_scheduled else 0
-
-    return {
-        "current_streak": current_streak,
-        "week_completion_rate": week_completion_rate,
-        "total_completed": total_completed,
-    }
+from app.routers.stats import compute_user_stats
 
 @router.post("/request", status_code=status.HTTP_201_CREATED)
 def send_request(
@@ -223,18 +134,22 @@ def leaderboard(
 
     results = []
     # Include yourself
-    my_stats = compute_stats(db, current_user)
+    my_stats = compute_user_stats(db, current_user)
     results.append(schemas.FriendStatsOut(
         friend=schemas.FriendOut.model_validate(current_user),
-        **my_stats,
+        current_streak=my_stats.current_streak,
+        week_completion_rate=my_stats.week_completion_rate,
+        total_completed=my_stats.total_completed,
     ))
 
     for f in friendships:
         friend = f.addressee if f.requester_id == current_user.id else f.requester
-        stats = compute_stats(db, friend)
+        stats = compute_user_stats(db, friend)
         results.append(schemas.FriendStatsOut(
             friend=schemas.FriendOut.model_validate(friend),
-            **stats,
+            current_streak=stats.current_streak,
+            week_completion_rate=stats.week_completion_rate,
+            total_completed=stats.total_completed,
         ))
 
     results.sort(key=lambda x: (x.current_streak, x.week_completion_rate), reverse=True)

@@ -94,12 +94,28 @@ def _migrate(connection):
                 "ALTER TABLE habits ALTER COLUMN end_time DROP NOT NULL"
             ))
 
-    # ── habits: duration_minutes (nueva columna) ───────────────────────────
+    # ── habits: recurrence & start_date (nuevas columnas) ─────────────────
     if "habits" in tables:
         habit_cols = {c["name"] for c in inspector.get_columns("habits")}
         if "duration_minutes" not in habit_cols:
             connection.execute(text(
                 "ALTER TABLE habits ADD COLUMN duration_minutes INTEGER DEFAULT NULL"
+            ))
+        if "start_date" not in habit_cols:
+            connection.execute(text(
+                "ALTER TABLE habits ADD COLUMN start_date DATE DEFAULT NULL"
+            ))
+        if "recurrence_type" not in habit_cols:
+            connection.execute(text(
+                "ALTER TABLE habits ADD COLUMN recurrence_type VARCHAR(10) NOT NULL DEFAULT 'weekly'"
+            ))
+        if "recurrence_interval" not in habit_cols:
+            connection.execute(text(
+                "ALTER TABLE habits ADD COLUMN recurrence_interval INTEGER DEFAULT NULL"
+            ))
+        if "recurrence_day_of_month" not in habit_cols:
+            connection.execute(text(
+                "ALTER TABLE habits ADD COLUMN recurrence_day_of_month INTEGER DEFAULT NULL"
             ))
 
     # ── categories: unique constraint (user_id, name) ─────────────────────────

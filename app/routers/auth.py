@@ -177,10 +177,11 @@ def reset_password(
         .first()
     )
 
-    if not reset_token:
-        raise HTTPException(status_code=400, detail="El enlace no es válido.")
+    expires_at = reset_token.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
 
-    if reset_token.expires_at < datetime.now(timezone.utc):
+    if expires_at < datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail="El enlace ha expirado. Solicita uno nuevo.")
 
     user = db.query(models.User).filter(models.User.id == reset_token.user_id).first()

@@ -1,4 +1,4 @@
-from datetime import date as date_type, datetime, timezone
+from datetime import date as date_type, datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -36,8 +36,9 @@ def upsert_log(
     if not habit:
         raise HTTPException(status_code=404, detail="Hábito no encontrado.")
 
-    today = datetime.now(timezone.utc).date()
-    if payload.date > today:
+    # Permitir hasta +1 día respecto a UTC para acomodar zonas horarias adelantadas (UTC+1 a UTC+14)
+    max_allowed_date = datetime.now(timezone.utc).date() + timedelta(days=1)
+    if payload.date > max_allowed_date:
         raise HTTPException(status_code=400, detail="No puedes registrar un hábito en una fecha futura.")
 
     log = (

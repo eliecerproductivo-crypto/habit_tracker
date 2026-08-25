@@ -288,6 +288,8 @@ def chat(
         .all()
     )
 
+    from app.routers.stats import compute_user_stats
+
     DAY_NAMES = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"]
 
     def fmt_days(days_str: str) -> str:
@@ -299,82 +301,20 @@ def chat(
 
     habits_lines = []
     for h in habits:
-        time_str = f"{h.start_time}–{h.end_time}" if h.start_time else "sin hora"
-        habits_lines.append(
-            f"  • {h.name} [{h.category}] — {time_str} — días: {fmt_days(h.days_of_week)}"
-        )
-
-    # ── Cumplimiento de los últimos 7 días por hábito ────────────────────────
-    today = date.today()
-    week_dates = [today - timedelta(days=i) for i in range(6, -1, -1)]
-
-    logs_week = (
-        db.query(models.HabitLog)
-        .filter(
-            models.HabitLog.user_id == current_user.id,
-            models.HabitLog.date >= week_dates[0],
-            models.HabitLog.date <= today,
-        )
-        .all()
-    )
-    log_map: dict = defaultdict(dict)  # habit_id -> date -> status
-    for log in logs_week:
-        log_map[log.habit_id][log.date] = log.status
-
-    # Stats globales rápidas
-    all_logs = db.query(models.HabitLog).filter(
-        models.HabitLog.user_id == current_user.id
-    ).all()
-    total_done = sum(1 for l in all_logs if l.status == "done")
-
-    # Racha actual - misma logica que stats.py:
-    # solo contar dias donde TODOS los habitos (que existian ese dia) son done/skipped.
-    habits_by_wd_chat: dict = {}
-    for h in habits:
-        for wd_str in h.days_of_week.split(","):
-            wd_str = wd_str.strip()
-            if wd_str.isdigit():
-                wd_int = int(wd_str)
-                habits_by_wd_chat.setdefault(wd_int, []).append(h)
-
-    streak = 0
-    cursor_d = today
-    for _ in range(365):
-        wd = cursor_d.isoweekday() % 7
-        all_sched = habits_by_wd_chat.get(wd, [])
-        sched = [h for h in all_sched if not (h.start_date and cursor_d < h.start_date)]
-        if not sched:
-            cursor_d -= timedelta(days=1)
-            continue
-        day_logs_map = {lg.habit_id: lg.status for lg in all_logs if lg.date == cursor_d}
-        if all(day_logs_map.get(h.id) in ("done", "skipped") for h in sched):
-            streak += 1
-            cursor_d -= timedelta(days=1)
+        time_str = f"{h.start_time}–{h.end_time}" if h.start_time else (f"{h.duration_minutes} min" if h.duration_minutes else "sin hora fija")
+        rtype = h.recurrence_type or "weekly"
+        if rtype == "interval":
+            freq_str = f"cada {h.recurrence_interval} días"
+        elif rtype == "monthly":
+            freq_str = "último día del mes" if h.recurrence_day_of_month == -1 else f"día {h.recurrence_day_of_month} del mes"
         else:
-            break
+            freq_str = f"días: {fmt_days(h.days_of_week)}"
+        habits_lines.append(
+            f"  • {h.name} [{h.category}] — {time_str} — {freq_str}"
+        )
 
-    # Tasa de cumplimiento de la semana
-    # - Hoy se excluye: el dia no ha terminado, los habitos pendientes bajan el % injustamente.
-    # - Solo cuentan dias >= start_date del habito.
-    # - Skipped se excluye de numerador y denominador.
-    week_scheduled = week_done = 0
-    for d in week_dates:
-        if d == today:
-            continue  # excluir hoy
-        wd = d.isoweekday() % 7
-        for h in habits:
-            days_set = {int(x) for x in h.days_of_week.split(",") if x.strip()}
-            if wd not in days_set:
-                continue
-            if h.start_date and d < h.start_date:
-                continue  # habito no existia ese dia
-            status = log_map.get(h.id, {}).get(d)
-            if status == "skipped":
-                continue
-            week_scheduled += 1
-            if status == "done":
-                week_done += 1
-    week_rate = round((week_done / week_scheduled) * 100) if week_scheduled else 0
+    today = date.today()
+    user_stats = compute_user_stats(db, current_user)
 
     # Contexto temporal para la IA: cuantos dias han pasado desde que inicio el habito mas reciente
     newest_habit_date = None
@@ -391,9 +331,9 @@ def chat(
         context_summaries=diary_context,
         habits_text="\n".join(habits_lines) if habits_lines else "Sin hábitos registrados.",
         stats={
-            "racha_actual": streak,
-            "cumplimiento_semana": f"{week_rate}%" if week_scheduled else "Sin datos aún (hábitos muy recientes)",
-            "total_completados_historico": total_done,
+            "racha_actual": user_stats.current_streak,
+            "cumplimiento_semana": f"{user_stats.week_completion_rate}%",
+            "total_completados_historico": user_stats.total_completed,
             "habitos_activos": len(habits),
             "dias_desde_inicio": days_since_newest,
             "nota_temporal": (
