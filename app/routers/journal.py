@@ -252,43 +252,38 @@ def chat(
     current_user: models.User = Depends(get_current_user),
 ):
     """
-    Chat con IA usando los últimos 7 resúmenes del diario + hábitos + stats como contexto.
-    El historial de conversación se pasa desde el frontend (stateless).
+    Chat con IA usando perfil, hábitos, estadísticas, notas recientes y
+    resúmenes del diario como contexto. El historial se pasa desde el frontend (stateless).
     """
     from app.ai import chat_with_context
     from datetime import date, timedelta
-    from collections import defaultdict
 
-    # ── Perfil del usuario (bio resumida) ────────────────────────────────────
+    today = date.today()
+
+    # ── 1. Días en la app (desde registro del usuario) ────────────────────────
+    days_in_app = (today - current_user.created_at.date()).days
+
+    # ── 2. Perfil del usuario ─────────────────────────────────────────────────
     user_profile = (
         db.query(models.UserProfile)
         .filter(models.UserProfile.user_id == current_user.id)
         .first()
     )
-    bio_summary = user_profile.bio_summary if user_profile and user_profile.bio_summary else None
+    # Usar resumen IA si existe, si no la bio cruda como fallback
+    if user_profile and user_profile.bio_summary:
+        bio_summary = user_profile.bio_summary
+    elif user_profile and user_profile.bio:
+        bio_summary = user_profile.bio[:600]  # limitar para no inflar el prompt
+    else:
+        bio_summary = None
 
-    # ── Resúmenes del diario (últimos 7) ──────────────────────────────────────
-    recent_summaries = (
-        db.query(models.JournalSummary)
-        .filter(models.JournalSummary.user_id == current_user.id)
-        .order_by(models.JournalSummary.date_to.desc())
-        .limit(7)
-        .all()
-    )
-    diary_context = [
-        f"[{s.date_from}] {s.summary}"
-        for s in reversed(recent_summaries)
-    ]
-
-    # ── Hábitos activos ───────────────────────────────────────────────────────
+    # ── 3. Hábitos activos ────────────────────────────────────────────────────
     habits = (
         db.query(models.Habit)
         .filter(models.Habit.user_id == current_user.id, models.Habit.is_active.is_(True))
         .order_by(models.Habit.start_time.nulls_last())
         .all()
     )
-
-    from app.routers.stats import compute_user_stats
 
     DAY_NAMES = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"]
 
@@ -301,28 +296,62 @@ def chat(
 
     habits_lines = []
     for h in habits:
-        time_str = f"{h.start_time}–{h.end_time}" if h.start_time else (f"{h.duration_minutes} min" if h.duration_minutes else "sin hora fija")
+        time_str = (
+            f"{h.start_time}–{h.end_time}" if h.start_time
+            else (f"{h.duration_minutes} min" if h.duration_minutes else "sin hora fija")
+        )
         rtype = h.recurrence_type or "weekly"
         if rtype == "interval":
             freq_str = f"cada {h.recurrence_interval} días"
         elif rtype == "monthly":
-            freq_str = "último día del mes" if h.recurrence_day_of_month == -1 else f"día {h.recurrence_day_of_month} del mes"
+            freq_str = (
+                "último día del mes" if h.recurrence_day_of_month == -1
+                else f"día {h.recurrence_day_of_month} del mes"
+            )
         else:
             freq_str = f"días: {fmt_days(h.days_of_week)}"
+
+        desc_str = f" — {h.description}" if h.description else ""
         habits_lines.append(
-            f"  • {h.name} [{h.category}] — {time_str} — {freq_str}"
+            f"  • {h.name} [{h.category}]{desc_str} — {time_str} — {freq_str}"
         )
 
-    today = date.today()
+    # ── 4. Notas recientes en texto completo (hoy y últimos 3 días) ───────────
+    recent_entries = (
+        db.query(models.JournalEntry)
+        .filter(
+            models.JournalEntry.user_id == current_user.id,
+            models.JournalEntry.entry_date >= today - timedelta(days=3),
+        )
+        .order_by(models.JournalEntry.entry_date.asc())
+        .all()
+    )
+    recent_notes_lines = [
+        f"  [{e.entry_date}] {e.content}"
+        for e in recent_entries
+    ]
+
+    # ── 5. Resúmenes del diario (últimos 7, para contexto histórico) ──────────
+    recent_summaries = (
+        db.query(models.JournalSummary)
+        .filter(models.JournalSummary.user_id == current_user.id)
+        .order_by(models.JournalSummary.date_to.desc())
+        .limit(7)
+        .all()
+    )
+    diary_context = [
+        f"[{s.date_from}] {s.summary}"
+        for s in reversed(recent_summaries)
+    ]
+
+    # ── 6. Estadísticas ───────────────────────────────────────────────────────
+    from app.routers.stats import compute_user_stats
     user_stats = compute_user_stats(db, current_user)
 
-    # Contexto temporal para la IA: cuantos dias han pasado desde que inicio el habito mas reciente
-    newest_habit_date = None
-    for h in habits:
-        effective_start = h.start_date or h.created_at.date()
-        if newest_habit_date is None or effective_start > newest_habit_date:
-            newest_habit_date = effective_start
-    days_since_newest = (today - newest_habit_date).days if newest_habit_date else None
+    nota_temporal = (
+        f"El usuario lleva solo {days_in_app} día(s) en la app. "
+        "No evalúes el cumplimiento como si fuera una tendencia consolidada."
+    ) if days_in_app < 7 else None
 
     history = [{"role": m.role, "content": m.content} for m in payload.history]
 
@@ -330,16 +359,15 @@ def chat(
         user_message=payload.message,
         context_summaries=diary_context,
         habits_text="\n".join(habits_lines) if habits_lines else "Sin hábitos registrados.",
+        recent_notes=recent_notes_lines,
         stats={
+            "dias_en_app": days_in_app,
             "racha_actual": user_stats.current_streak,
+            "mejor_racha": user_stats.best_streak,
             "cumplimiento_semana": f"{user_stats.week_completion_rate}%",
             "total_completados_historico": user_stats.total_completed,
             "habitos_activos": len(habits),
-            "dias_desde_inicio": days_since_newest,
-            "nota_temporal": (
-                f"El usuario lleva solo {days_since_newest} día(s) usando la app. "
-                "No evalúes el cumplimiento como si fuera una tendencia consolidada."
-            ) if days_since_newest is not None and days_since_newest < 7 else None,
+            "nota_temporal": nota_temporal,
         },
         history=history,
         bio_summary=bio_summary,

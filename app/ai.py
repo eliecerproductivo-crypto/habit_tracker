@@ -146,43 +146,64 @@ def chat_with_context(
     habits_text: str = "",
     stats: dict | None = None,
     bio_summary: str | None = None,
+    recent_notes: list[str] | None = None,
 ) -> Optional[str]:
     """
-    Responde al usuario usando perfil personal, hábitos, estadísticas
-    y resúmenes del diario como contexto.
+    Responde al usuario usando perfil personal, hábitos, estadísticas,
+    notas recientes y resúmenes del diario como contexto.
     """
-    diary_block = "\n\n".join(
-        f"- {s}" for s in context_summaries
-    ) if context_summaries else "Sin entradas de diario aún."
+    # ── Perfil ────────────────────────────────────────────────────────────────
+    bio_block = f"\n\nQUIÉN SOY (perfil del usuario):\n{bio_summary}" if bio_summary else ""
 
-    bio_block = f"\n\nPERFIL DEL USUARIO:\n{bio_summary}" if bio_summary else ""
+    # ── Hábitos ───────────────────────────────────────────────────────────────
+    habits_block = f"\n\nHÁBITOS ACTIVOS:\n{habits_text}" if habits_text else ""
 
+    # ── Estadísticas ──────────────────────────────────────────────────────────
     stats_block = ""
     if stats:
         nota = stats.get("nota_temporal")
         nota_line = f"\n  ⚠ {nota}" if nota else ""
+        dias_en_app = stats.get("dias_en_app")
+        dias_line = f"\n  • Días en la app: {dias_en_app}" if dias_en_app is not None else ""
         stats_block = (
-            f"\n\nESTADÍSTICAS:\n"
+            f"\n\nESTADÍSTICAS:"
+            f"{dias_line}\n"
             f"  • Racha actual: {stats.get('racha_actual', 0)} días\n"
+            f"  • Mejor racha: {stats.get('mejor_racha', 0)} días\n"
             f"  • Cumplimiento esta semana: {stats.get('cumplimiento_semana', '0%')}\n"
             f"  • Hábitos activos: {stats.get('habitos_activos', 0)}\n"
             f"  • Total completados (histórico): {stats.get('total_completados_historico', 0)}"
             f"{nota_line}"
         )
 
-    habits_block = f"\n\nHÁBITOS ACTIVOS:\n{habits_text}" if habits_text else ""
+    # ── Notas recientes en texto completo (últimos 3 días) ────────────────────
+    notes_block = ""
+    if recent_notes:
+        notes_text = "\n".join(recent_notes)
+        notes_block = f"\n\nNOTAS RECIENTES DEL DIARIO (texto completo, últimos 3 días):\n{notes_text}"
+
+    # ── Resúmenes históricos del diario ───────────────────────────────────────
+    diary_block = (
+        "\n\n".join(f"- {s}" for s in context_summaries)
+        if context_summaries
+        else "Sin resúmenes de diario aún."
+    )
 
     system_prompt = (
         "Eres un coach personal de hábitos y productividad. "
         "Tu objetivo es ayudar al usuario a entender sus patrones, mejorar su rutina y superar bloqueos. "
-        "Usa el contexto completo (perfil, hábitos, estadísticas y diario) para dar respuestas personalizadas y concretas. "
+        "Usa el contexto completo (perfil, hábitos, estadísticas, notas recientes y diario) "
+        "para dar respuestas personalizadas y concretas. "
         "Responde siempre en español, de forma empática pero directa. "
         "Sé conciso: cada palabra debe aportar valor. Elimina relleno, repeticiones y frases obvias. "
-        "Si la respuesta puede ser corta sin perder sustancia, que sea corta. Si necesita más detalle, dalo, pero sin paja. "
+        "Si la respuesta puede ser corta sin perder sustancia, que sea corta. "
+        "Si necesita más detalle, dalo, pero sin paja. "
         "Texto plano, sin markdown, sin asteriscos, sin almohadillas, sin viñetas. Párrafos normales. "
-        "IMPORTANTE: si las estadísticas incluyen una nota temporal (usuario nuevo o hábitos recientes), "
-        "NO uses el porcentaje de cumplimiento para hacer juicios negativos — es demasiado pronto para evaluar tendencias.\n\n"
-        f"RESÚMENES DEL DIARIO (últimos días):\n{diary_block}"
+        "IMPORTANTE: si las estadísticas incluyen una nota temporal (usuario nuevo), "
+        "NO uses el porcentaje de cumplimiento para hacer juicios negativos — "
+        "es demasiado pronto para evaluar tendencias.\n\n"
+        f"RESÚMENES DEL DIARIO (contexto histórico):\n{diary_block}"
+        f"{notes_block}"
         f"{bio_block}"
         f"{habits_block}"
         f"{stats_block}"
