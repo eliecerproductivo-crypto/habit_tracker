@@ -126,7 +126,10 @@ def compute_user_stats(db: Session, user: models.User) -> schemas.StatsSummary:
     today = date_type.today()
 
     current_streak = 0
-    cursor = today
+    # Si hoy ya tiene al menos un log, lo incluimos en la racha.
+    # Si aún no hay logs hoy (el día no ha terminado), empezamos desde ayer.
+    today_has_logs = bool(status_by_date.get(today))
+    cursor = today if today_has_logs else today - timedelta(days=1)
     for _ in range(MAX_LOOKBACK_DAYS):
         status = _day_status(cursor, habits_by_weekday, non_weekly, status_by_date)
         if status is None:
@@ -151,11 +154,21 @@ def compute_user_stats(db: Session, user: models.User) -> schemas.StatsSummary:
         cursor += timedelta(days=1)
     best_streak = max(best_streak, current_streak)
 
-    # last 6 completed days (today excluded -- day hasn't ended yet)
+    # Cumplimiento: últimos 6 días completados, pero solo desde que el primer hábito existe.
+    # Esto evita penalizar días anteriores al inicio del usuario.
+    oldest_habit_date = None
+    for h in habits:
+        effective = h.start_date or h.created_at.date()
+        if oldest_habit_date is None or effective < oldest_habit_date:
+            oldest_habit_date = effective
+
     total_scheduled = 0
     total_done = 0
     for i in range(1, 7):
         d = today - timedelta(days=i)
+        # No contar días anteriores al primer hábito
+        if oldest_habit_date and d < oldest_habit_date:
+            continue
         weekday = d.isoweekday() % 7
         day_logs = status_by_date.get(d, {})
 
