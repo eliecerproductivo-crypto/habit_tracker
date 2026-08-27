@@ -37,7 +37,13 @@ def create_habit(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    habit = models.Habit(**payload.model_dump(), user_id=current_user.id)
+    from datetime import date as date_type
+    data = payload.model_dump()
+    # Si no se define fecha de inicio, se usa hoy para que el hábito
+    # no se proyecte hacia días anteriores a su creación.
+    if data.get("start_date") is None:
+        data["start_date"] = date_type.today()
+    habit = models.Habit(**data, user_id=current_user.id)
     db.add(habit)
     db.commit()
     db.refresh(habit)

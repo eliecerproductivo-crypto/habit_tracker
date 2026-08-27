@@ -100,11 +100,13 @@ def _day_status(
 
     scheduled = []
     for h in habits_by_weekday.get(weekday, []):
-        if h.start_date and d < h.start_date:
+        effective_start = h.start_date or h.created_at.date()
+        if d < effective_start:
             continue
         scheduled.append(h)
     for h in non_weekly:
-        if h.start_date and d < h.start_date:
+        effective_start = h.start_date or h.created_at.date()
+        if d < effective_start:
             continue
         if _habit_occurs_on_date(h, d):
             scheduled.append(h)
@@ -173,7 +175,8 @@ def compute_user_stats(db: Session, user: models.User) -> schemas.StatsSummary:
         day_logs = status_by_date.get(d, {})
 
         for h in habits_by_weekday.get(weekday, []):
-            if h.start_date and d < h.start_date:
+            effective_start = h.start_date or h.created_at.date()
+            if d < effective_start:
                 continue
             s = day_logs.get(h.id)
             if s == "skipped":
@@ -183,7 +186,8 @@ def compute_user_stats(db: Session, user: models.User) -> schemas.StatsSummary:
                 total_done += 1
 
         for h in non_weekly:
-            if h.start_date and d < h.start_date:
+            effective_start = h.start_date or h.created_at.date()
+            if d < effective_start:
                 continue
             if not _habit_occurs_on_date(h, d):
                 continue
@@ -223,13 +227,15 @@ def weekly(db: Session = Depends(get_db), current_user: models.User = Depends(ge
 
         effective = []
         for h in habits_by_weekday.get(weekday, []):
-            if h.start_date and d < h.start_date:
+            effective_start = h.start_date or h.created_at.date()
+            if d < effective_start:
                 continue
             if day_logs.get(h.id) == "skipped":
                 continue
             effective.append(h)
         for h in non_weekly:
-            if h.start_date and d < h.start_date:
+            effective_start = h.start_date or h.created_at.date()
+            if d < effective_start:
                 continue
             if not _habit_occurs_on_date(h, d):
                 continue
