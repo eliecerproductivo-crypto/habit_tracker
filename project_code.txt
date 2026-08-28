@@ -37,10 +37,229 @@ app.add_middleware(StripApiPrefix)
 === app\__init__.py ===
 # Load a local .env file (if present) before any submodule reads os.environ.
 # On Vercel, env vars come from Project Settings instead, and .env won't exist —
-# load_dotenv() simply no-ops in that case.
+# load_dotenv() simply no-ops in that case. wow
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+=== app\ai.py ===
+#a
+"""
+Servicio de IA: resúmenes de diario y chat con contexto personal.
+Usa Google Gemini API con fallback automático entre 2 keys y reintentos.
+"""
+import os
+import time
+import logging
+import json
+import urllib.request
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+# Lee todas las keys disponibles: OPENAI_API_KEY, OPENAI_API_KEY_2, OPENAI_API_KEY_3, ...
+# Para agregar más, solo añade OPENAI_API_KEY_N en las variables de entorno.
+def _load_api_keys() -> list[str]:
+    keys = []
+    # Key principal sin número
+    k = os.getenv("OPENAI_API_KEY")
+    if k:
+        keys.append(k)
+    # Keys numeradas a partir del 2 — busca hasta que no haya más
+    i = 2
+    while True:
+        k = os.getenv(f"OPENAI_API_KEY_{i}")
+        if not k:
+            break
+        keys.append(k)
+        i += 1
+    return keys
+
+GEMINI_API_KEYS: list[str] = _load_api_keys()
+
+MODEL = "gemini-3.1-flash-lite"        # modelo preview gratuito de Gemini 3.1
+GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+
+MAX_RETRIES = 3
+RETRY_DELAY = 2
+
+
+def _call_gemini(api_key: str, messages: list[dict], max_tokens: int = 500) -> str:
+    """
+    Llama a la API de Gemini.
+    Convierte el formato OpenAI-style (role/content) al formato Gemini (parts).
+    """
+    # Separar system prompt del resto
+    system_text = None
+    conversation = []
+    for m in messages:
+        if m["role"] == "system":
+            system_text = m["content"]
+        else:
+            # Gemini usa "user" y "model" en vez de "user" y "assistant"
+            role = "model" if m["role"] == "assistant" else "user"
+            conversation.append({"role": role, "parts": [{"text": m["content"]}]})
+
+    payload: dict = {
+        "contents": conversation,
+        "generationConfig": {
+            "maxOutputTokens": max_tokens,
+            "temperature": 0.7,
+        },
+    }
+    if system_text:
+        payload["systemInstruction"] = {"parts": [{"text": system_text}]}
+
+    url = f"{GEMINI_BASE}/{MODEL}:generateContent?key={api_key}"
+    data = json.dumps(payload).encode("utf-8")
+
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        result = json.loads(resp.read())
+        return result["candidates"][0]["content"]["parts"][0]["text"].strip()
+
+
+def _call_with_fallback(messages: list[dict], max_tokens: int = 500) -> Optional[str]:
+    """Intenta con cada key disponible, con reintentos por key."""
+    if not GEMINI_API_KEYS:
+        logger.warning("No OPENAI_API_KEY (Gemini key) configured")
+        return None
+
+    for key_index, api_key in enumerate(GEMINI_API_KEYS):
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                logger.info("Gemini call attempt %d/%d with key #%d", attempt, MAX_RETRIES, key_index + 1)
+                result = _call_gemini(api_key, messages, max_tokens)
+                logger.info("Gemini call succeeded with key #%d on attempt %d", key_index + 1, attempt)
+                return result
+            except Exception as e:
+                logger.warning("Key #%d attempt %d/%d failed: %s", key_index + 1, attempt, MAX_RETRIES, e)
+                if attempt < MAX_RETRIES:
+                    time.sleep(RETRY_DELAY)
+
+    logger.error("All Gemini keys and retries exhausted")
+    return None
+
+
+def summarize_bio(bio_text: str) -> Optional[str]:
+    """
+    Extrae un perfil de contexto comprimido de la bio del usuario.
+    Elimina relleno y deja solo lo útil para la IA coach.
+    """
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Eres un extractor de contexto personal. Tu tarea es leer la autobiografía de un usuario "
+                "y producir un perfil comprimido (máximo 150 palabras) en español en tercera persona. "
+                "Extrae únicamente: nombre, objetivos de vida, áreas de interés, valores, estilo de vida. "
+                "Elimina todo lo que no sea relevante para un coach personal. "
+                "Sé concreto y neutro. No agregues opiniones ni consejos."
+            ),
+        },
+        {"role": "user", "content": bio_text},
+    ]
+    return _call_with_fallback(messages, max_tokens=250)
+
+
+def summarize_entries(entries_text: str) -> Optional[str]:
+    """Resume una entrada de diario. Retorna el resumen o None si falla."""
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Resume esta entrada de diario en español lo más breve posible. "
+                "Incluye solo: estado emocional, qué hizo o no hizo, y algún patrón notable. "
+                "Elimina todo relleno. Cuantas menos palabras necesites para transmitir lo esencial, mejor."
+            ),
+        },
+        {"role": "user", "content": entries_text},
+    ]
+    return _call_with_fallback(messages, max_tokens=120)
+
+
+def chat_with_context(
+    user_message: str,
+    context_summaries: list[str],
+    history: list[dict],
+    habits_text: str = "",
+    stats: dict | None = None,
+    bio_summary: str | None = None,
+    recent_notes: list[str] | None = None,
+) -> Optional[str]:
+    """
+    Responde al usuario usando perfil personal, hábitos, estadísticas,
+    notas recientes y resúmenes del diario como contexto.
+    """
+    # ── Perfil ────────────────────────────────────────────────────────────────
+    bio_block = f"\n\nQUIÉN SOY (perfil del usuario):\n{bio_summary}" if bio_summary else ""
+
+    # ── Hábitos ───────────────────────────────────────────────────────────────
+    habits_block = f"\n\nHÁBITOS ACTIVOS:\n{habits_text}" if habits_text else ""
+
+    # ── Estadísticas ──────────────────────────────────────────────────────────
+    stats_block = ""
+    if stats:
+        nota = stats.get("nota_temporal")
+        nota_line = f"\n  ⚠ {nota}" if nota else ""
+        dias_en_app = stats.get("dias_en_app")
+        dias_line = f"\n  • Días en la app: {dias_en_app}" if dias_en_app is not None else ""
+        stats_block = (
+            f"\n\nESTADÍSTICAS:"
+            f"{dias_line}\n"
+            f"  • Racha actual: {stats.get('racha_actual', 0)} días\n"
+            f"  • Mejor racha: {stats.get('mejor_racha', 0)} días\n"
+            f"  • Cumplimiento esta semana: {stats.get('cumplimiento_semana', '0%')}\n"
+            f"  • Hábitos activos: {stats.get('habitos_activos', 0)}\n"
+            f"  • Total completados (histórico): {stats.get('total_completados_historico', 0)}"
+            f"{nota_line}"
+        )
+
+    # ── Notas recientes en texto completo (últimos 3 días) ────────────────────
+    notes_block = ""
+    if recent_notes:
+        notes_text = "\n".join(recent_notes)
+        notes_block = f"\n\nNOTAS RECIENTES DEL DIARIO (texto completo, últimos 3 días):\n{notes_text}"
+
+    # ── Resúmenes históricos del diario ───────────────────────────────────────
+    diary_block = (
+        "\n\n".join(f"- {s}" for s in context_summaries)
+        if context_summaries
+        else "Sin resúmenes de diario aún."
+    )
+
+    system_prompt = (
+        "Eres un coach personal de hábitos y productividad. "
+        "Tu objetivo es ayudar al usuario a entender sus patrones, mejorar su rutina y superar bloqueos. "
+        "Usa el contexto completo (perfil, hábitos, estadísticas, notas recientes y diario) "
+        "para dar respuestas personalizadas y concretas. "
+        "Responde siempre en español, de forma empática pero directa. "
+        "Sé conciso: cada palabra debe aportar valor. Elimina relleno, repeticiones y frases obvias. "
+        "Si la respuesta puede ser corta sin perder sustancia, que sea corta. "
+        "Si necesita más detalle, dalo, pero sin paja. "
+        "Texto plano, sin markdown, sin asteriscos, sin almohadillas, sin viñetas. Párrafos normales. "
+        "IMPORTANTE: si las estadísticas incluyen una nota temporal (usuario nuevo), "
+        "NO uses el porcentaje de cumplimiento para hacer juicios negativos — "
+        "es demasiado pronto para evaluar tendencias.\n\n"
+        f"RESÚMENES DEL DIARIO (contexto histórico):\n{diary_block}"
+        f"{notes_block}"
+        f"{bio_block}"
+        f"{habits_block}"
+        f"{stats_block}"
+    )
+
+    messages = [{"role": "system", "content": system_prompt}]
+    messages.extend(history[-10:])
+    messages.append({"role": "user", "content": user_message})
+
+    return _call_with_fallback(messages, max_tokens=400)
 
 
 === app\auth.py ===
@@ -154,6 +373,8 @@ else:
     # Serverless functions are short-lived: don't keep a persistent pool around
     # between invocations. Supabase's pooler (pgbouncer) handles pooling for us.
     engine_kwargs["poolclass"] = NullPool
+    # PgBouncer en transaction mode no soporta prepared statements de psycopg3
+    connect_args = {"prepare_threshold": None}
 
 engine = create_engine(DATABASE_URL, connect_args=connect_args, **engine_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -182,7 +403,6 @@ def _migrate(connection):
         columns = {c["name"] for c in inspector.get_columns("habit_logs")}
 
         if "completed" in columns and "status" not in columns:
-            # Postgres and SQLite both support ADD COLUMN
             connection.execute(text(
                 "ALTER TABLE habit_logs ADD COLUMN status VARCHAR(10) NOT NULL DEFAULT 'done'"
             ))
@@ -191,12 +411,10 @@ def _migrate(connection):
             ))
 
         if "completed_at" in columns and "logged_at" not in columns:
-            # Postgres supports RENAME COLUMN; SQLite ≥3.25 also does
             connection.execute(text(
                 "ALTER TABLE habit_logs RENAME COLUMN completed_at TO logged_at"
             ))
 
-        # Drop old column only on Postgres (SQLite < 3.35 doesn't support DROP COLUMN)
         if "completed" in columns and "status" in columns:
             dialect = connection.dialect.name
             if dialect == "postgresql":
@@ -204,6 +422,51 @@ def _migrate(connection):
                     "ALTER TABLE habit_logs DROP COLUMN IF EXISTS completed"
                 ))
 
+    # ── habits: start_time / end_time → nullable ───────────────────────────
+    if "habits" in tables:
+        dialect = connection.dialect.name
+        if dialect == "postgresql":
+            connection.execute(text(
+                "ALTER TABLE habits ALTER COLUMN start_time DROP NOT NULL"
+            ))
+            connection.execute(text(
+                "ALTER TABLE habits ALTER COLUMN end_time DROP NOT NULL"
+            ))
+
+    # ── habits: recurrence & start_date (nuevas columnas) ─────────────────
+    if "habits" in tables:
+        habit_cols = {c["name"] for c in inspector.get_columns("habits")}
+        if "duration_minutes" not in habit_cols:
+            connection.execute(text(
+                "ALTER TABLE habits ADD COLUMN duration_minutes INTEGER DEFAULT NULL"
+            ))
+        if "start_date" not in habit_cols:
+            connection.execute(text(
+                "ALTER TABLE habits ADD COLUMN start_date DATE DEFAULT NULL"
+            ))
+        if "recurrence_type" not in habit_cols:
+            connection.execute(text(
+                "ALTER TABLE habits ADD COLUMN recurrence_type VARCHAR(10) NOT NULL DEFAULT 'weekly'"
+            ))
+        if "recurrence_interval" not in habit_cols:
+            connection.execute(text(
+                "ALTER TABLE habits ADD COLUMN recurrence_interval INTEGER DEFAULT NULL"
+            ))
+        if "recurrence_day_of_month" not in habit_cols:
+            connection.execute(text(
+                "ALTER TABLE habits ADD COLUMN recurrence_day_of_month INTEGER DEFAULT NULL"
+            ))
+
+    # ── categories: unique constraint (user_id, name) ─────────────────────────
+    if "categories" in tables:
+        dialect = connection.dialect.name
+        if dialect == "postgresql":
+            connection.execute(text(
+                "DO $$ BEGIN "
+                "IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_category_user_name') "
+                "THEN ALTER TABLE categories ADD CONSTRAINT uq_category_user_name UNIQUE (user_id, name); "
+                "END IF; END $$;"
+            ))
 
 def init_db():
     # Creates tables if they don't exist yet, then applies pending migrations.
@@ -213,6 +476,80 @@ def init_db():
 
     with engine.begin() as conn:
         _migrate(conn)
+
+
+=== app\mailer.py ===
+import os
+import smtplib
+import logging
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+logger = logging.getLogger(__name__)
+
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+APP_URL = os.getenv("APP_URL", "http://localhost:5173")
+FROM_EMAIL = os.getenv("FROM_EMAIL", SMTP_USER)
+
+
+def send_reset_email(to_email: str, user_name: str, token: str) -> None:
+    """Envía el correo de recuperación de contraseña."""
+    reset_url = f"{APP_URL}/reset-password?token={token}"
+
+    if not SMTP_USER or not SMTP_PASSWORD:
+        # En desarrollo sin SMTP configurado, solo imprime el link
+        print(f"[EMAIL] Reset link for {to_email}: {reset_url}")
+        return
+
+    subject = "Recupera tu contraseña — rutina"
+
+    html_body = f"""
+    <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;color:#1a1a1a">
+      <h2 style="margin:0 0 8px;font-size:20px">Recupera tu contraseña</h2>
+      <p style="margin:0 0 24px;color:#555">Hola {user_name}, recibimos una solicitud para restablecer la contraseña de tu cuenta en <strong>rutina</strong>.</p>
+      <a href="{reset_url}"
+         style="display:inline-block;background:#1a1a1a;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:600;font-size:14px">
+        Restablecer contraseña
+      </a>
+      <p style="margin:24px 0 0;font-size:12px;color:#999">
+        Este enlace es válido por <strong>1 hora</strong> y solo puede usarse una vez.<br>
+        Si no solicitaste este cambio, puedes ignorar este correo.
+      </p>
+    </div>
+    """
+
+    text_body = (
+        f"Hola {user_name},\n\n"
+        f"Para restablecer tu contraseña entra a este enlace (válido por 1 hora):\n"
+        f"{reset_url}\n\n"
+        f"Si no solicitaste este cambio, ignora este correo."
+    )
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = FROM_EMAIL
+    msg["To"] = to_email
+    msg.attach(MIMEText(text_body, "plain"))
+    msg.attach(MIMEText(html_body, "html"))
+
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.set_debuglevel(1)  # imprime diálogo SMTP en consola
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(FROM_EMAIL, to_email, msg.as_string())
+        logger.info("Reset email sent to %s", to_email)
+    except smtplib.SMTPAuthenticationError as e:
+        logger.error("SMTP auth failed: %s", e)
+        raise
+    except Exception as e:
+        logger.error("Failed to send reset email to %s: %s", to_email, e)
+        raise
 
 
 === app\main.py ===
@@ -225,7 +562,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import init_db
-from app.routers import auth, habits, logs, stats
+from app.routers import auth, habits, logs, stats, friends, categories, journal, profile
 
 app = FastAPI(title="Rutina API", version="1.0.0")
 
@@ -270,6 +607,10 @@ app.include_router(auth.router)
 app.include_router(habits.router)
 app.include_router(logs.router)
 app.include_router(stats.router)
+app.include_router(friends.router)
+app.include_router(categories.router)
+app.include_router(journal.router)
+app.include_router(profile.router)
 
 
 === app\models.py ===
@@ -300,6 +641,21 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     habits = relationship("Habit", back_populates="owner", cascade="all, delete-orphan")
+    sent_requests = relationship("Friendship", foreign_keys="Friendship.requester_id", back_populates="requester", cascade="all, delete-orphan")
+    received_requests = relationship("Friendship", foreign_keys="Friendship.addressee_id", back_populates="addressee", cascade="all, delete-orphan")
+
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    token = Column(String(64), unique=True, index=True, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User")
 
 
 class Habit(Base):
@@ -316,10 +672,19 @@ class Habit(Base):
     days_of_week = Column(String(20), nullable=False, default="0,1,2,3,4,5,6")
 
     # Stored as "HH:MM" 24h strings for simplicity across DB backends
-    start_time = Column(String(5), nullable=False, default="08:00")
-    end_time = Column(String(5), nullable=False, default="09:00")
+    start_time = Column(String(5), nullable=True, default=None)
+    end_time = Column(String(5), nullable=True, default=None)
 
     is_active = Column(Boolean, default=True, nullable=False)
+    start_date = Column(Date, nullable=True, default=None)
+    # recurrence_type: "weekly" | "interval" | "monthly"
+    recurrence_type = Column(String(10), nullable=False, default="weekly")
+    # interval: repeat every N days (used when recurrence_type="interval")
+    recurrence_interval = Column(Integer, nullable=True, default=None)
+    # day_of_month: 1-28 or -1 for last day (used when recurrence_type="monthly")
+    recurrence_day_of_month = Column(Integer, nullable=True, default=None)
+    # duration in minutes for habits without a fixed time (e.g. "study 30 min any time")
+    duration_minutes = Column(Integer, nullable=True, default=None)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     owner = relationship("User", back_populates="habits")
@@ -342,13 +707,85 @@ class HabitLog(Base):
     habit = relationship("Habit", back_populates="logs")
 
 
+class Friendship(Base):
+    __tablename__ = "friendships"
+
+    id = Column(Integer, primary_key=True, index=True)
+    requester_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    addressee_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    # "pending" | "accepted" | "rejected"
+    status = Column(String(10), nullable=False, default="pending")
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    requester = relationship("User", foreign_keys=[requester_id], back_populates="sent_requests")
+    addressee = relationship("User", foreign_keys=[addressee_id], back_populates="received_requests")
+
+
+class Category(Base):
+    __tablename__ = "categories"
+    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_category_user_name"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    name = Column(String(100), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    owner = relationship("User", foreign_keys=[user_id])
+
+
+class JournalEntry(Base):
+    __tablename__ = "journal_entries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    content = Column(String(2000), nullable=False)
+    entry_date = Column(Date, nullable=False, default=date.today, index=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc))
+
+    owner = relationship("User", foreign_keys=[user_id])
+
+
+class JournalSummary(Base):
+    __tablename__ = "journal_summaries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    summary = Column(String(4000), nullable=False)
+    # Rango de fechas que cubre este resumen
+    date_from = Column(Date, nullable=False)
+    date_to = Column(Date, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    owner = relationship("User", foreign_keys=[user_id])
+
+
+class UserProfile(Base):
+    __tablename__ = "user_profiles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False, index=True)
+    # Texto libre escrito por el usuario (bio, objetivos, intereses, valores)
+    bio = Column(String(5000), nullable=False, default="")
+    # Versión comprimida generada por IA — solo lo útil para contexto
+    bio_summary = Column(String(1000), nullable=True, default=None)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc))
+
+    owner = relationship("User", foreign_keys=[user_id])
+
+
 === app\routers\__init__.py ===
 
 
 === app\routers\auth.py ===
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
+from pydantic import BaseModel, EmailStr
+import secrets
+from datetime import datetime, timedelta, timezone
 
 from app import models, schemas
 
@@ -357,11 +794,24 @@ from app.auth import (
     create_access_token,
     get_current_user,
     hash_password,
-    verify_password,   # <-- nuevo
+    verify_password,
 )
 from app.database import get_db
+from app.mailer import send_reset_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+DEFAULT_CATEGORIES = ["Trabajo", "Estudio", "Salud", "Personal", "Organizar"]
+
+
+def seed_default_categories(user_id: int, db: Session):
+    """Inserta las categorías default para un usuario si aún no tiene ninguna."""
+    existing = db.query(models.Category).filter(models.Category.user_id == user_id).first()
+    if existing:
+        return
+    for name in DEFAULT_CATEGORIES:
+        db.add(models.Category(user_id=user_id, name=name))
+    db.commit()
 
 
 @router.post("/register", response_model=schemas.UserOut, status_code=status.HTTP_201_CREATED)
@@ -378,7 +828,18 @@ def register(payload: schemas.UserCreate, db: Session = Depends(get_db)):
     db.add(user)
     db.commit()
     db.refresh(user)
+    seed_default_categories(user.id, db)
     return user
+
+
+@router.post("/seed-categories", status_code=status.HTTP_204_NO_CONTENT)
+def seed_my_categories(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Siembra las categorías default para usuarios que ya existían antes de este cambio."""
+    seed_default_categories(current_user.id, db)
+    return None
 
 
 @router.post("/login", response_model=schemas.Token)
@@ -443,6 +904,315 @@ def delete_me(
     db.commit()
     return None
 
+
+# ── Recuperación de contraseña ─────────────────────────────────────────────────
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
+@router.post("/forgot-password", status_code=status.HTTP_204_NO_CONTENT)
+def forgot_password(
+    payload: ForgotPasswordRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    user = db.query(models.User).filter(models.User.email == payload.email).first()
+    # Siempre respondemos 204 para no revelar si el correo existe o no
+    if not user:
+        return None
+
+    # Invalidar tokens anteriores sin usar
+    db.query(models.PasswordResetToken).filter(
+        models.PasswordResetToken.user_id == user.id,
+        models.PasswordResetToken.used == False,
+    ).update({"used": True})
+
+    token_value = secrets.token_urlsafe(32)
+    reset_token = models.PasswordResetToken(
+        user_id=user.id,
+        token=token_value,
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+    db.add(reset_token)
+    db.commit()
+
+    background_tasks.add_task(send_reset_email, user.email, user.name, token_value)
+    return None
+
+
+@router.post("/reset-password", status_code=status.HTTP_204_NO_CONTENT)
+def reset_password(
+    payload: ResetPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    reset_token = (
+        db.query(models.PasswordResetToken)
+        .filter(
+            models.PasswordResetToken.token == payload.token,
+            models.PasswordResetToken.used == False,
+        )
+        .first()
+    )
+
+    expires_at = reset_token.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+    if expires_at < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="El enlace ha expirado. Solicita uno nuevo.")
+
+    user = db.query(models.User).filter(models.User.id == reset_token.user_id).first()
+    user.hashed_password = hash_password(payload.new_password)
+    reset_token.used = True
+    db.commit()
+    return None
+
+
+=== app\routers\categories.py ===
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from pydantic import BaseModel, Field
+
+from app import models
+from app.auth import get_current_user
+from app.database import get_db
+
+router = APIRouter(prefix="/categories", tags=["categories"])
+
+
+class CategoryCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+
+
+class CategoryOut(BaseModel):
+    id: int
+    name: str
+
+    class Config:
+        from_attributes = True
+
+
+@router.get("", response_model=list[CategoryOut])
+def list_categories(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    return (
+        db.query(models.Category)
+        .filter(models.Category.user_id == current_user.id)
+        .order_by(models.Category.name)
+        .all()
+    )
+
+
+@router.post("", response_model=CategoryOut, status_code=status.HTTP_201_CREATED)
+def create_category(
+    payload: CategoryCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    existing = (
+        db.query(models.Category)
+        .filter(
+            models.Category.user_id == current_user.id,
+            models.Category.name.ilike(payload.name.strip()),
+        )
+        .first()
+    )
+    if existing:
+        return existing  # idempotent — return existing instead of error
+
+    cat = models.Category(user_id=current_user.id, name=payload.name.strip())
+    db.add(cat)
+    db.commit()
+    db.refresh(cat)
+    return cat
+
+
+@router.delete("/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_category(
+    category_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    cat = (
+        db.query(models.Category)
+        .filter(
+            models.Category.id == category_id,
+            models.Category.user_id == current_user.id,
+        )
+        .first()
+    )
+    if not cat:
+        raise HTTPException(status_code=404, detail="Categoría no encontrada.")
+    db.delete(cat)
+    db.commit()
+
+
+=== app\routers\friends.py ===
+from datetime import date, timedelta
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from sqlalchemy import or_, and_
+
+from app import models, schemas
+from app.auth import get_current_user
+from app.database import get_db
+
+router = APIRouter(prefix="/friends", tags=["friends"])
+
+
+def get_friendship(db, user_id: int, other_id: int):
+    return db.query(models.Friendship).filter(
+        or_(
+            and_(models.Friendship.requester_id == user_id, models.Friendship.addressee_id == other_id),
+            and_(models.Friendship.requester_id == other_id, models.Friendship.addressee_id == user_id),
+        )
+    ).first()
+
+
+from app.routers.stats import compute_user_stats
+
+@router.post("/request", status_code=status.HTTP_201_CREATED)
+def send_request(
+    payload: schemas.FriendRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    if payload.email == current_user.email:
+        raise HTTPException(status_code=400, detail="No puedes agregarte a ti mismo.")
+
+    target = db.query(models.User).filter(models.User.email == payload.email).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="No existe una cuenta con ese correo.")
+
+    existing = get_friendship(db, current_user.id, target.id)
+    if existing:
+        if existing.status == "accepted":
+            raise HTTPException(status_code=400, detail="Ya son amigos.")
+        if existing.status == "pending":
+            raise HTTPException(status_code=400, detail="Ya enviaste una solicitud o tienes una pendiente.")
+
+    friendship = models.Friendship(requester_id=current_user.id, addressee_id=target.id)
+    db.add(friendship)
+    db.commit()
+    return {"detail": "Solicitud enviada."}
+
+
+@router.get("", response_model=list[schemas.FriendshipOut])
+def list_friends(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    rows = db.query(models.Friendship).filter(
+        or_(
+            models.Friendship.requester_id == current_user.id,
+            models.Friendship.addressee_id == current_user.id,
+        )
+    ).all()
+
+    result = []
+    for f in rows:
+        i_am_requester = f.requester_id == current_user.id
+        friend = f.addressee if i_am_requester else f.requester
+        result.append(schemas.FriendshipOut(
+            id=f.id,
+            status=f.status,
+            friend=schemas.FriendOut.model_validate(friend),
+            i_am_requester=i_am_requester,
+        ))
+    return result
+
+
+@router.put("/{friendship_id}/accept", status_code=status.HTTP_204_NO_CONTENT)
+def accept_request(
+    friendship_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    f = db.query(models.Friendship).filter(models.Friendship.id == friendship_id).first()
+    if not f or f.addressee_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Solicitud no encontrada.")
+    if f.status != "pending":
+        raise HTTPException(status_code=400, detail="La solicitud ya fue procesada.")
+    f.status = "accepted"
+    db.commit()
+
+
+@router.put("/{friendship_id}/reject", status_code=status.HTTP_204_NO_CONTENT)
+def reject_request(
+    friendship_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    f = db.query(models.Friendship).filter(models.Friendship.id == friendship_id).first()
+    if not f or f.addressee_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Solicitud no encontrada.")
+    f.status = "rejected"
+    db.commit()
+
+
+@router.delete("/{friendship_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_friend(
+    friendship_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    f = db.query(models.Friendship).filter(
+        models.Friendship.id == friendship_id,
+        or_(
+            models.Friendship.requester_id == current_user.id,
+            models.Friendship.addressee_id == current_user.id,
+        )
+    ).first()
+    if not f:
+        raise HTTPException(status_code=404, detail="Amistad no encontrada.")
+    db.delete(f)
+    db.commit()
+
+
+@router.get("/leaderboard", response_model=list[schemas.FriendStatsOut])
+def leaderboard(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    friendships = db.query(models.Friendship).filter(
+        models.Friendship.status == "accepted",
+        or_(
+            models.Friendship.requester_id == current_user.id,
+            models.Friendship.addressee_id == current_user.id,
+        )
+    ).all()
+
+    results = []
+    # Include yourself
+    my_stats = compute_user_stats(db, current_user)
+    results.append(schemas.FriendStatsOut(
+        friend=schemas.FriendOut.model_validate(current_user),
+        current_streak=my_stats.current_streak,
+        week_completion_rate=my_stats.week_completion_rate,
+        total_completed=my_stats.total_completed,
+    ))
+
+    for f in friendships:
+        friend = f.addressee if f.requester_id == current_user.id else f.requester
+        stats = compute_user_stats(db, friend)
+        results.append(schemas.FriendStatsOut(
+            friend=schemas.FriendOut.model_validate(friend),
+            current_streak=stats.current_streak,
+            week_completion_rate=stats.week_completion_rate,
+            total_completed=stats.total_completed,
+        ))
+
+    results.sort(key=lambda x: (x.current_streak, x.week_completion_rate), reverse=True)
+    return results
+
+
 === app\routers\habits.py ===
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -472,7 +1242,7 @@ def list_habits(
     return (
         db.query(models.Habit)
         .filter(models.Habit.user_id == current_user.id)
-        .order_by(models.Habit.start_time)
+        .order_by(models.Habit.start_time.nulls_last())
         .all()
     )
 
@@ -483,7 +1253,13 @@ def create_habit(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    habit = models.Habit(**payload.model_dump(), user_id=current_user.id)
+    from datetime import date as date_type
+    data = payload.model_dump()
+    # Si no se define fecha de inicio, se usa hoy para que el hábito
+    # no se proyecte hacia días anteriores a su creación.
+    if data.get("start_date") is None:
+        data["start_date"] = date_type.today()
+    habit = models.Habit(**data, user_id=current_user.id)
     db.add(habit)
     db.commit()
     db.refresh(habit)
@@ -517,8 +1293,450 @@ def delete_habit(
     return None
 
 
+=== app\routers\journal.py ===
+from datetime import date, datetime, timezone
+import logging
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+from app import models
+from app.auth import get_current_user
+from app.database import get_db
+
+router = APIRouter(prefix="/journal", tags=["journal"])
+
+logger = logging.getLogger(__name__)
+
+
+# ── Schemas ────────────────────────────────────────────────────────────────────
+
+class EntryUpsert(BaseModel):
+    content: str = Field(min_length=1, max_length=2000)
+    entry_date: date
+
+
+class EntryOut(BaseModel):
+    id: int
+    content: str
+    entry_date: date
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SummaryOut(BaseModel):
+    id: int
+    summary: str
+    date_from: date
+    date_to: date
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class JournalOverview(BaseModel):
+    entries: list[EntryOut]
+    summaries: list[SummaryOut]
+
+
+# ── Background task ────────────────────────────────────────────────────────────
+
+def _summarize_pending_bg(user_id: int, saved_date: date):
+    """
+    Se ejecuta en background al guardar una entrada.
+    - Si la entrada guardada es de hoy: busca entradas anteriores sin resumen y las procesa.
+    - Si la entrada guardada es de un día pasado: la resume directamente.
+    Solo hace UNA llamada a la IA por ejecución para no gastar tokens.
+    """
+    from app.ai import summarize_entries
+    from app.database import SessionLocal
+    from datetime import date as date_type
+
+    today = date_type.today()
+    db = SessionLocal()
+    try:
+        if saved_date >= today:
+            # Buscar la entrada pasada más reciente sin resumen
+            entry_to_summarize = (
+                db.query(models.JournalEntry)
+                .filter(
+                    models.JournalEntry.user_id == user_id,
+                    models.JournalEntry.entry_date < today,
+                )
+                .outerjoin(
+                    models.JournalSummary,
+                    (models.JournalSummary.user_id == user_id) &
+                    (models.JournalSummary.date_from == models.JournalEntry.entry_date) &
+                    (models.JournalSummary.date_to == models.JournalEntry.entry_date),
+                )
+                .filter(models.JournalSummary.id.is_(None))
+                .order_by(models.JournalEntry.entry_date.desc())
+                .first()
+            )
+            if not entry_to_summarize:
+                return  # Todo ya está resumido
+        else:
+            # La entrada guardada es de un día pasado — resumirla directamente
+            entry_to_summarize = (
+                db.query(models.JournalEntry)
+                .filter(
+                    models.JournalEntry.user_id == user_id,
+                    models.JournalEntry.entry_date == saved_date,
+                )
+                .first()
+            )
+            if not entry_to_summarize:
+                return
+
+        entry_date = entry_to_summarize.entry_date
+        content = entry_to_summarize.content
+        entry_id = entry_to_summarize.id
+
+        summary_text = summarize_entries(f"[{entry_date}] {content}")
+        if not summary_text:
+            logger.warning("AI summarization returned None for entry %d", entry_id)
+            return
+
+        existing = (
+            db.query(models.JournalSummary)
+            .filter(
+                models.JournalSummary.user_id == user_id,
+                models.JournalSummary.date_from == entry_date,
+                models.JournalSummary.date_to == entry_date,
+            )
+            .first()
+        )
+        if existing:
+            existing.summary = summary_text
+            existing.created_at = datetime.now(timezone.utc)
+        else:
+            db.add(models.JournalSummary(
+                user_id=user_id,
+                summary=summary_text,
+                date_from=entry_date,
+                date_to=entry_date,
+            ))
+        db.commit()
+        logger.info("Summary saved for user %d, date %s", user_id, entry_date)
+    except Exception as e:
+        logger.error("Background summarization failed: %s", e)
+    finally:
+        db.close()
+
+
+def _summarize_all_pending_bg(user_id: int):
+    """
+    Se ejecuta en background al abrir el diario (GET /journal).
+    Resume todas las entradas pasadas que aún no tienen resumen.
+    Solo se llama a la IA si hay algo pendiente.
+    """
+    from app.ai import summarize_entries
+    from app.database import SessionLocal
+    from datetime import date as date_type
+
+    today = date_type.today()
+    db = SessionLocal()
+    try:
+        pending = (
+            db.query(models.JournalEntry)
+            .filter(
+                models.JournalEntry.user_id == user_id,
+                models.JournalEntry.entry_date < today,
+            )
+            .outerjoin(
+                models.JournalSummary,
+                (models.JournalSummary.user_id == user_id) &
+                (models.JournalSummary.date_from == models.JournalEntry.entry_date) &
+                (models.JournalSummary.date_to == models.JournalEntry.entry_date),
+            )
+            .filter(models.JournalSummary.id.is_(None))
+            .order_by(models.JournalEntry.entry_date.asc())
+            .all()
+        )
+
+        if not pending:
+            return  # Nada pendiente, sin llamadas a la IA
+
+        for entry in pending:
+            summary_text = summarize_entries(f"[{entry.entry_date}] {entry.content}")
+            if not summary_text:
+                logger.warning("AI summarization returned None for entry %d", entry.id)
+                continue
+            db.add(models.JournalSummary(
+                user_id=user_id,
+                summary=summary_text,
+                date_from=entry.entry_date,
+                date_to=entry.entry_date,
+            ))
+            db.commit()
+            logger.info("Summary saved for user %d, date %s", user_id, entry.entry_date)
+    except Exception as e:
+        logger.error("Background summarization (all pending) failed: %s", e)
+    finally:
+        db.close()
+
+
+# ── Endpoints ──────────────────────────────────────────────────────────────────
+
+@router.get("", response_model=JournalOverview)
+def get_journal(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    entries = (
+        db.query(models.JournalEntry)
+        .filter(models.JournalEntry.user_id == current_user.id)
+        .order_by(models.JournalEntry.entry_date.desc())
+        .all()
+    )
+    summaries = (
+        db.query(models.JournalSummary)
+        .filter(models.JournalSummary.user_id == current_user.id)
+        .order_by(models.JournalSummary.date_to.desc())
+        .all()
+    )
+
+    # Resumir en background cualquier entrada pasada sin resumen
+    background_tasks.add_task(_summarize_all_pending_bg, current_user.id)
+
+    return {"entries": entries, "summaries": summaries}
+
+
+@router.put("/entry", response_model=EntryOut)
+def upsert_entry(
+    payload: EntryUpsert,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Crea o actualiza la entrada del día.
+    Dispara automáticamente el resumen IA en background.
+    """
+    existing = (
+        db.query(models.JournalEntry)
+        .filter(
+            models.JournalEntry.user_id == current_user.id,
+            models.JournalEntry.entry_date == payload.entry_date,
+        )
+        .first()
+    )
+    if existing:
+        existing.content = payload.content
+        existing.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(existing)
+        entry = existing
+    else:
+        entry = models.JournalEntry(
+            user_id=current_user.id,
+            content=payload.content,
+            entry_date=payload.entry_date,
+        )
+        db.add(entry)
+        db.commit()
+        db.refresh(entry)
+
+    # Disparar resumen en background — una llamada por guardado, no bloquea la respuesta
+    background_tasks.add_task(
+        _summarize_pending_bg,
+        current_user.id,
+        entry.entry_date,
+    )
+
+    return entry
+
+
+@router.delete("/entry/{entry_date}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_entry(
+    entry_date: date,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    entry = (
+        db.query(models.JournalEntry)
+        .filter(
+            models.JournalEntry.user_id == current_user.id,
+            models.JournalEntry.entry_date == entry_date,
+        )
+        .first()
+    )
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entrada no encontrada.")
+
+    # Borrar también el resumen del día si existe
+    db.query(models.JournalSummary).filter(
+        models.JournalSummary.user_id == current_user.id,
+        models.JournalSummary.date_from == entry_date,
+        models.JournalSummary.date_to == entry_date,
+    ).delete()
+
+    db.delete(entry)
+    db.commit()
+    return None
+
+
+# ── Chat ───────────────────────────────────────────────────────────────────────
+
+class ChatMessage(BaseModel):
+    role: str          # "user" o "assistant"
+    content: str
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=1000)
+    history: list[ChatMessage] = []  # historial de la sesión actual
+
+
+class ChatResponse(BaseModel):
+    reply: str
+
+
+@router.post("/chat", response_model=ChatResponse)
+def chat(
+    payload: ChatRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Chat con IA usando perfil, hábitos, estadísticas, notas recientes y
+    resúmenes del diario como contexto. El historial se pasa desde el frontend (stateless).
+    """
+    from app.ai import chat_with_context
+    from datetime import date, timedelta
+
+    today = date.today()
+
+    # ── 1. Días en la app (desde registro del usuario) ────────────────────────
+    days_in_app = (today - current_user.created_at.date()).days
+
+    # ── 2. Perfil del usuario ─────────────────────────────────────────────────
+    user_profile = (
+        db.query(models.UserProfile)
+        .filter(models.UserProfile.user_id == current_user.id)
+        .first()
+    )
+    # Usar resumen IA si existe, si no la bio cruda como fallback
+    if user_profile and user_profile.bio_summary:
+        bio_summary = user_profile.bio_summary
+    elif user_profile and user_profile.bio:
+        bio_summary = user_profile.bio[:600]  # limitar para no inflar el prompt
+    else:
+        bio_summary = None
+
+    # ── 3. Hábitos activos ────────────────────────────────────────────────────
+    habits = (
+        db.query(models.Habit)
+        .filter(models.Habit.user_id == current_user.id, models.Habit.is_active.is_(True))
+        .order_by(models.Habit.start_time.nulls_last())
+        .all()
+    )
+
+    DAY_NAMES = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"]
+
+    def fmt_days(days_str: str) -> str:
+        try:
+            days = [int(d) for d in days_str.split(",") if d.strip()]
+            return ", ".join(DAY_NAMES[d] for d in sorted(days))
+        except Exception:
+            return days_str
+
+    habits_lines = []
+    for h in habits:
+        time_str = (
+            f"{h.start_time}–{h.end_time}" if h.start_time
+            else (f"{h.duration_minutes} min" if h.duration_minutes else "sin hora fija")
+        )
+        rtype = h.recurrence_type or "weekly"
+        if rtype == "interval":
+            freq_str = f"cada {h.recurrence_interval} días"
+        elif rtype == "monthly":
+            freq_str = (
+                "último día del mes" if h.recurrence_day_of_month == -1
+                else f"día {h.recurrence_day_of_month} del mes"
+            )
+        else:
+            freq_str = f"días: {fmt_days(h.days_of_week)}"
+
+        desc_str = f" — {h.description}" if h.description else ""
+        habits_lines.append(
+            f"  • {h.name} [{h.category}]{desc_str} — {time_str} — {freq_str}"
+        )
+
+    # ── 4. Notas recientes en texto completo (hoy y últimos 3 días) ───────────
+    recent_entries = (
+        db.query(models.JournalEntry)
+        .filter(
+            models.JournalEntry.user_id == current_user.id,
+            models.JournalEntry.entry_date >= today - timedelta(days=3),
+        )
+        .order_by(models.JournalEntry.entry_date.asc())
+        .all()
+    )
+    recent_notes_lines = [
+        f"  [{e.entry_date}] {e.content}"
+        for e in recent_entries
+    ]
+
+    # ── 5. Resúmenes del diario (últimos 7, para contexto histórico) ──────────
+    recent_summaries = (
+        db.query(models.JournalSummary)
+        .filter(models.JournalSummary.user_id == current_user.id)
+        .order_by(models.JournalSummary.date_to.desc())
+        .limit(7)
+        .all()
+    )
+    diary_context = [
+        f"[{s.date_from}] {s.summary}"
+        for s in reversed(recent_summaries)
+    ]
+
+    # ── 6. Estadísticas ───────────────────────────────────────────────────────
+    from app.routers.stats import compute_user_stats
+    user_stats = compute_user_stats(db, current_user)
+
+    nota_temporal = (
+        f"El usuario lleva solo {days_in_app} día(s) en la app. "
+        "No evalúes el cumplimiento como si fuera una tendencia consolidada."
+    ) if days_in_app < 7 else None
+
+    history = [{"role": m.role, "content": m.content} for m in payload.history]
+
+    reply = chat_with_context(
+        user_message=payload.message,
+        context_summaries=diary_context,
+        habits_text="\n".join(habits_lines) if habits_lines else "Sin hábitos registrados.",
+        recent_notes=recent_notes_lines,
+        stats={
+            "dias_en_app": days_in_app,
+            "racha_actual": user_stats.current_streak,
+            "mejor_racha": user_stats.best_streak,
+            "cumplimiento_semana": f"{user_stats.week_completion_rate}%",
+            "total_completados_historico": user_stats.total_completed,
+            "habitos_activos": len(habits),
+            "nota_temporal": nota_temporal,
+        },
+        history=history,
+        bio_summary=bio_summary,
+    )
+
+    if not reply:
+        raise HTTPException(
+            status_code=503,
+            detail="La IA no está disponible en este momento. Intenta de nuevo.",
+        )
+
+    return {"reply": reply}
+
+
 === app\routers\logs.py ===
-from datetime import date as date_type, datetime, timezone
+from datetime import date as date_type, datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -556,8 +1774,9 @@ def upsert_log(
     if not habit:
         raise HTTPException(status_code=404, detail="Hábito no encontrado.")
 
-    today = datetime.now(timezone.utc).date()
-    if payload.date > today:
+    # Permitir hasta +1 día respecto a UTC para acomodar zonas horarias adelantadas (UTC+1 a UTC+14)
+    max_allowed_date = datetime.now(timezone.utc).date() + timedelta(days=1)
+    if payload.date > max_allowed_date:
         raise HTTPException(status_code=400, detail="No puedes registrar un hábito en una fecha futura.")
 
     log = (
@@ -605,9 +1824,110 @@ def delete_log(
     return None
 
 
+=== app\routers\profile.py ===
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+from app import models
+from app.auth import get_current_user
+from app.database import get_db
+
+router = APIRouter(prefix="/profile", tags=["profile"])
+
+
+class ProfileOut(BaseModel):
+    bio: str
+    bio_summary: str | None
+
+    class Config:
+        from_attributes = True
+
+
+class ProfileUpdate(BaseModel):
+    bio: str = Field(max_length=5000)
+
+
+@router.get("", response_model=ProfileOut)
+def get_profile(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    profile = (
+        db.query(models.UserProfile)
+        .filter(models.UserProfile.user_id == current_user.id)
+        .first()
+    )
+    if not profile:
+        return ProfileOut(bio="", bio_summary=None)
+    return profile
+
+
+@router.put("", response_model=ProfileOut)
+def update_profile(
+    payload: ProfileUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Guarda la bio del usuario. No llama a la IA — eso se hace en /profile/summarize."""
+    profile = (
+        db.query(models.UserProfile)
+        .filter(models.UserProfile.user_id == current_user.id)
+        .first()
+    )
+    if profile:
+        profile.bio = payload.bio
+        profile.updated_at = datetime.now(timezone.utc)
+    else:
+        profile = models.UserProfile(
+            user_id=current_user.id,
+            bio=payload.bio,
+        )
+        db.add(profile)
+    db.commit()
+    db.refresh(profile)
+    return profile
+
+
+@router.post("/summarize", response_model=ProfileOut)
+def summarize_profile(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Genera un resumen comprimido de la bio usando IA.
+    Solo extrae lo relevante para dar contexto al coach.
+    """
+    from app.ai import summarize_bio
+
+    profile = (
+        db.query(models.UserProfile)
+        .filter(models.UserProfile.user_id == current_user.id)
+        .first()
+    )
+    if not profile or not profile.bio.strip():
+        raise HTTPException(status_code=400, detail="Escribe tu bio antes de resumirla.")
+
+    summary = summarize_bio(profile.bio)
+    if not summary:
+        raise HTTPException(
+            status_code=503,
+            detail="La IA no está disponible. Intenta de nuevo.",
+        )
+
+    profile.bio_summary = summary
+    profile.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(profile)
+    return profile
+
+
 === app\routers\stats.py ===
 from collections import defaultdict
 from datetime import date as date_type, timedelta
+import calendar
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -618,12 +1938,48 @@ from app.database import get_db
 
 router = APIRouter(prefix="/stats", tags=["stats"])
 
-WEEKDAY_LABELS = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"]
+WEEKDAY_LABELS = [
+    "dom", "lun", "mar",
+    "mi\u00e9", "jue", "vie", "s\u00e1b",
+]
 MAX_LOOKBACK_DAYS = 365
 
 
 def _parse_days(days_of_week: str) -> set[int]:
     return {int(d) for d in days_of_week.split(",") if d.strip() != ""}
+
+
+def _habit_occurs_on_date(h: models.Habit, d: date_type) -> bool:
+    """
+    Python equivalent of the frontend habitOccursOnDate().
+    Returns True if habit h is scheduled to occur on date d.
+    Handles weekly, interval, and monthly recurrence types.
+    Does NOT check start_date -- callers do that separately.
+    """
+    rtype = h.recurrence_type or "weekly"
+
+    if rtype == "weekly":
+        wd = d.isoweekday() % 7
+        return wd in _parse_days(h.days_of_week)
+
+    if rtype == "interval":
+        interval = h.recurrence_interval
+        if not interval or interval < 1:
+            return False
+        ref = h.start_date or h.created_at.date()
+        diff = (d - ref).days
+        return diff >= 0 and diff % interval == 0
+
+    if rtype == "monthly":
+        dom = h.recurrence_day_of_month
+        if dom is None:
+            return False
+        if dom == -1:
+            last_day = calendar.monthrange(d.year, d.month)[1]
+            return d.day == last_day
+        return d.day == dom
+
+    return False
 
 
 def _load_context(db: Session, user: models.User):
@@ -634,27 +1990,54 @@ def _load_context(db: Session, user: models.User):
     )
     logs = db.query(models.HabitLog).filter(models.HabitLog.user_id == user.id).all()
 
-    # Maps: date -> habit_id -> status
     status_by_date: dict[date_type, dict[int, str]] = defaultdict(dict)
     for log in logs:
         status_by_date[log.date][log.habit_id] = log.status
 
+    # Weekly habits indexed by weekday (0-6 JS convention).
+    # interval/monthly kept separate -- _habit_occurs_on_date() is called per day.
     habits_by_weekday: dict[int, list[models.Habit]] = defaultdict(list)
+    non_weekly: list[models.Habit] = []
     for habit in habits:
-        for wd in _parse_days(habit.days_of_week):
-            habits_by_weekday[wd].append(habit)
+        if (habit.recurrence_type or "weekly") == "weekly":
+            for wd in _parse_days(habit.days_of_week):
+                habits_by_weekday[wd].append(habit)
+        else:
+            non_weekly.append(habit)
 
-    return habits, logs, status_by_date, habits_by_weekday
+    return habits, logs, status_by_date, habits_by_weekday, non_weekly
 
 
-def _day_status(d: date_type, habits_by_weekday, status_by_date) -> bool | None:
+def _day_status(
+    d: date_type,
+    habits_by_weekday,
+    non_weekly,
+    status_by_date,
+) -> bool | None:
     """
-    True  = all scheduled habits are done or skipped (skipped = neutral, doesn't break streak)
-    False = at least one habit failed or has no log at all
-    None  = nothing scheduled that day
+    True  = all habits due on d (that existed on d) are done or skipped.
+    False = at least one is missing or failed.
+    None  = nothing scheduled that day.
+
+    Handles weekly, interval, and monthly recurrence types.
+    A habit is only counted if d >= habit.start_date (or start_date is None).
+    skipped is neutral.
     """
-    weekday = d.isoweekday() % 7  # 0=domingo ... 6=sábado (matches JS Date#getDay())
-    scheduled = habits_by_weekday.get(weekday, [])
+    weekday = d.isoweekday() % 7
+
+    scheduled = []
+    for h in habits_by_weekday.get(weekday, []):
+        effective_start = h.start_date or h.created_at.date()
+        if d < effective_start:
+            continue
+        scheduled.append(h)
+    for h in non_weekly:
+        effective_start = h.start_date or h.created_at.date()
+        if d < effective_start:
+            continue
+        if _habit_occurs_on_date(h, d):
+            scheduled.append(h)
+
     if not scheduled:
         return None
 
@@ -662,22 +2045,22 @@ def _day_status(d: date_type, habits_by_weekday, status_by_date) -> bool | None:
     for h in scheduled:
         s = day_logs.get(h.id)
         if s == "done" or s == "skipped":
-            continue  # ok — done counts, skipped is neutral
-        # failed or no log → day is broken
+            continue
         return False
     return True
 
 
-@router.get("/summary", response_model=schemas.StatsSummary)
-def summary(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    habits, logs, status_by_date, habits_by_weekday = _load_context(db, current_user)
+def compute_user_stats(db: Session, user: models.User) -> schemas.StatsSummary:
+    habits, logs, status_by_date, habits_by_weekday, non_weekly = _load_context(db, user)
     today = date_type.today()
 
-    # --- streaks ---
     current_streak = 0
-    cursor = today
+    # Si hoy ya tiene al menos un log, lo incluimos en la racha.
+    # Si aún no hay logs hoy (el día no ha terminado), empezamos desde ayer.
+    today_has_logs = bool(status_by_date.get(today))
+    cursor = today if today_has_logs else today - timedelta(days=1)
     for _ in range(MAX_LOOKBACK_DAYS):
-        status = _day_status(cursor, habits_by_weekday, status_by_date)
+        status = _day_status(cursor, habits_by_weekday, non_weekly, status_by_date)
         if status is None:
             cursor -= timedelta(days=1)
             continue
@@ -691,32 +2074,58 @@ def summary(db: Session = Depends(get_db), current_user: models.User = Depends(g
     running = 0
     cursor = today - timedelta(days=MAX_LOOKBACK_DAYS)
     while cursor <= today:
-        status = _day_status(cursor, habits_by_weekday, status_by_date)
+        status = _day_status(cursor, habits_by_weekday, non_weekly, status_by_date)
         if status is True:
             running += 1
             best_streak = max(best_streak, running)
         elif status is False:
             running = 0
-        # status is None: day doesn't count, doesn't reset streak
         cursor += timedelta(days=1)
     best_streak = max(best_streak, current_streak)
 
-    # --- last 7 days completion rate (only done counts, skipped excluded from denominator) ---
+    # Cumplimiento: últimos 6 días completados, pero solo desde que el primer hábito existe.
+    # Esto evita penalizar días anteriores al inicio del usuario.
+    oldest_habit_date = None
+    for h in habits:
+        effective = h.start_date or h.created_at.date()
+        if oldest_habit_date is None or effective < oldest_habit_date:
+            oldest_habit_date = effective
+
     total_scheduled = 0
     total_done = 0
-    for i in range(7):
+    for i in range(1, 7):
         d = today - timedelta(days=i)
-        scheduled = habits_by_weekday.get(d.isoweekday() % 7, [])
+        # No contar días anteriores al primer hábito
+        if oldest_habit_date and d < oldest_habit_date:
+            continue
+        weekday = d.isoweekday() % 7
         day_logs = status_by_date.get(d, {})
-        for h in scheduled:
+
+        for h in habits_by_weekday.get(weekday, []):
+            effective_start = h.start_date or h.created_at.date()
+            if d < effective_start:
+                continue
             s = day_logs.get(h.id)
             if s == "skipped":
-                continue  # don't count skipped in either numerator or denominator
+                continue
             total_scheduled += 1
             if s == "done":
                 total_done += 1
-    week_completion_rate = round((total_done / total_scheduled) * 100) if total_scheduled else 0
 
+        for h in non_weekly:
+            effective_start = h.start_date or h.created_at.date()
+            if d < effective_start:
+                continue
+            if not _habit_occurs_on_date(h, d):
+                continue
+            s = day_logs.get(h.id)
+            if s == "skipped":
+                continue
+            total_scheduled += 1
+            if s == "done":
+                total_done += 1
+
+    week_completion_rate = round((total_done / total_scheduled) * 100) if total_scheduled else 0
     total_completed = sum(1 for log in logs if log.status == "done")
 
     return schemas.StatsSummary(
@@ -727,20 +2136,40 @@ def summary(db: Session = Depends(get_db), current_user: models.User = Depends(g
     )
 
 
+@router.get("/summary", response_model=schemas.StatsSummary)
+def summary(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    return compute_user_stats(db, current_user)
+
+
 @router.get("/weekly", response_model=list[schemas.WeeklyStat])
 def weekly(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    _, _, status_by_date, habits_by_weekday = _load_context(db, current_user)
+    _, _, status_by_date, habits_by_weekday, non_weekly = _load_context(db, current_user)
     today = date_type.today()
 
     result = []
     for i in range(6, -1, -1):
         d = today - timedelta(days=i)
         weekday = d.isoweekday() % 7
-        scheduled = habits_by_weekday.get(weekday, [])
         day_logs = status_by_date.get(d, {})
 
-        # skipped habits are excluded from both counts (neutral)
-        effective = [h for h in scheduled if day_logs.get(h.id) != "skipped"]
+        effective = []
+        for h in habits_by_weekday.get(weekday, []):
+            effective_start = h.start_date or h.created_at.date()
+            if d < effective_start:
+                continue
+            if day_logs.get(h.id) == "skipped":
+                continue
+            effective.append(h)
+        for h in non_weekly:
+            effective_start = h.start_date or h.created_at.date()
+            if d < effective_start:
+                continue
+            if not _habit_occurs_on_date(h, d):
+                continue
+            if day_logs.get(h.id) == "skipped":
+                continue
+            effective.append(h)
+
         completed_count = sum(1 for h in effective if day_logs.get(h.id) == "done")
 
         result.append(
@@ -774,7 +2203,6 @@ def by_category(db: Session = Depends(get_db), current_user: models.User = Depen
         schemas.CategoryStat(category=cat, completed_count=count)
         for cat, count in sorted(counts.items(), key=lambda kv: -kv[1])
     ]
-
 
 === app\schemas.py ===
 from datetime import date, datetime
@@ -819,9 +2247,14 @@ class HabitBase(BaseModel):
         default="0,1,2,3,4,5,6",
         description="Comma-separated weekdays, 0=domingo ... 6=sábado",
     )
-    start_time: str = Field(pattern=TIME_RE)
-    end_time: str = Field(pattern=TIME_RE)
+    start_time: Optional[str] = Field(default=None, pattern=TIME_RE)
+    end_time: Optional[str] = Field(default=None, pattern=TIME_RE)
     is_active: bool = True
+    start_date: Optional[date] = None
+    recurrence_type: str = Field(default="weekly", pattern="^(weekly|interval|monthly)$")
+    recurrence_interval: Optional[int] = Field(default=None, ge=1, le=365)
+    recurrence_day_of_month: Optional[int] = Field(default=None, ge=-1, le=31)
+    duration_minutes: Optional[int] = Field(default=None, ge=1, le=480)
 
     @field_validator("days_of_week")
     @classmethod
@@ -847,6 +2280,10 @@ class HabitOut(HabitBase):
     id: int
     user_id: int
     created_at: datetime
+    start_date: Optional[date] = None
+    recurrence_type: str = "weekly"
+    recurrence_interval: Optional[int] = None
+    recurrence_day_of_month: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -908,6 +2345,35 @@ class UserUpdate(BaseModel):
 class PasswordChange(BaseModel):
     current_password: str = Field(min_length=1)
     new_password: str = Field(min_length=6, max_length=200)
+
+
+# ---------- Friends ----------
+
+class FriendRequest(BaseModel):
+    email: EmailStr
+
+class FriendOut(BaseModel):
+    id: int
+    name: str
+    email: EmailStr
+
+    class Config:
+        from_attributes = True
+
+class FriendshipOut(BaseModel):
+    id: int
+    status: str
+    friend: FriendOut
+    i_am_requester: bool
+
+    class Config:
+        from_attributes = True
+
+class FriendStatsOut(BaseModel):
+    friend: FriendOut
+    current_streak: int
+    week_completion_rate: int
+    total_completed: int
 
 
 === frontend\index.html ===
@@ -984,6 +2450,7 @@ import axios from "axios";
 // In production on Vercel, /api resolves to the serverless functions in /api.
 const api = axios.create({
   baseURL: "/api",
+  timeout: 30000, // 30s para tolerar cold starts de Vercel
 });
 
 const TOKEN_KEY = "habit_tracker_token";
@@ -1013,6 +2480,7 @@ export function setUnauthorizedHandler(fn) {
 api.interceptors.response.use(
   (res) => res,
   (error) => {
+    // Solo cerrar sesión en 401 real, no en timeouts o errores de red
     if (error?.response?.status === 401) {
       setToken(null);
       if (onUnauthorized) onUnauthorized();
@@ -1031,9 +2499,15 @@ import { ThemeProvider } from "./context/ThemeContext";
 import AppShell from "./components/AppShell";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
 import Dashboard from "./pages/Dashboard";
 import Habits from "./pages/Habits";
 import Stats from "./pages/Stats";
+import Friends from "./pages/Friends";
+import Journal from "./pages/Journal";
+import Coach from "./pages/Coach";
+import Profile from "./pages/Profile";
 
 function FullScreenLoader() {
   return (
@@ -1076,6 +2550,8 @@ function AppRoutes() {
           </PublicOnlyRoute>
         }
       />
+      <Route path="/recuperar" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route
         path="/"
         element={
@@ -1097,6 +2573,38 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <Stats />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/amigos"
+        element={
+          <ProtectedRoute>
+            <Friends />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/diario"
+        element={
+          <ProtectedRoute>
+            <Journal />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/coach"
+        element={
+          <ProtectedRoute>
+            <Coach />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/perfil-ia"
+        element={
+          <ProtectedRoute>
+            <Profile />
           </ProtectedRoute>
         }
       />
@@ -1368,24 +2876,244 @@ export default function AccountModal({ open, onClose }) {
 }
 
 
+=== frontend\src\components\AIChat.jsx ===
+import { useEffect, useRef, useState } from "react";
+import { Send, Sparkles, Bot, User, Trash2 } from "lucide-react";
+import api from "../api/client";
+
+const SESSION_KEY = "rutina_chat_history";
+
+function loadHistory() {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(history) {
+  try {
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(history));
+  } catch {
+    // sessionStorage lleno o no disponible — ignorar
+  }
+}
+
+function Message({ role, content }) {
+  const isUser = role === "user";
+  return (
+    <div className={`flex gap-2.5 ${isUser ? "flex-row-reverse" : ""}`}>
+      <div className={[
+        "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs",
+        isUser ? "bg-ink text-bg" : "bg-violet-soft text-violet",
+      ].join(" ")}>
+        {isUser ? <User size={13} /> : <Bot size={13} />}
+      </div>
+      <div className={[
+        "max-w-[80%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed",
+        isUser
+          ? "rounded-tr-sm bg-ink text-bg"
+          : "rounded-tl-sm bg-panel border border-line text-ink",
+      ].join(" ")}>
+        {content}
+      </div>
+    </div>
+  );
+}
+
+function TypingIndicator() {
+  return (
+    <div className="flex gap-2.5">
+      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-violet-soft text-violet">
+        <Bot size={13} />
+      </div>
+      <div className="rounded-2xl rounded-tl-sm border border-line bg-panel px-4 py-3">
+        <div className="flex gap-1">
+          {[0, 1, 2].map((i) => (
+            <span
+              key={i}
+              className="h-1.5 w-1.5 rounded-full bg-ink-faint animate-bounce"
+              style={{ animationDelay: `${i * 0.15}s` }}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const SUGGESTIONS = [
+  "¿Por qué siento que no soy productivo últimamente?",
+  "¿Qué patrón ves en mis hábitos esta semana?",
+  "¿Qué me recomiendas mejorar?",
+  "¿Cómo puedo mantener la racha?",
+];
+
+export default function AIChat() {
+  const [history, setHistory] = useState(() => loadHistory());
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const bottomRef = useRef(null);
+
+  // Persistir historial en sessionStorage cada vez que cambia
+  useEffect(() => {
+    saveHistory(history);
+  }, [history]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [history, loading]);
+
+  const send = async (message) => {
+    const text = message || input.trim();
+    if (!text || loading) return;
+    setInput("");
+    setError("");
+
+    const newHistory = [...history, { role: "user", content: text }];
+    setHistory(newHistory);
+    setLoading(true);
+
+    try {
+      const res = await api.post("/journal/chat", {
+        message: text,
+        history: history, // historial previo (sin el mensaje actual)
+      });
+      setHistory([...newHistory, { role: "assistant", content: res.data.reply }]);
+    } catch (err) {
+      setError(err?.response?.data?.detail || "La IA no está disponible. Intenta de nuevo.");
+      // Quitar el mensaje del usuario si falló
+      setHistory(history);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const isEmpty = history.length === 0;
+
+  return (
+    <div className="flex flex-col h-[520px] rounded-2xl border border-line bg-bg overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center gap-2 border-b border-line bg-panel px-4 py-3">
+        <div className="flex h-7 w-7 items-center justify-center rounded-full bg-violet-soft text-violet">
+          <Sparkles size={14} />
+        </div>
+        <div className="flex-1">
+          <p className="text-sm font-semibold text-ink">Coach IA</p>
+          <p className="text-xs text-ink-faint">Basado en tu diario de los últimos 7 días</p>
+        </div>
+        {history.length > 0 && (
+          <button
+            onClick={() => { setHistory([]); sessionStorage.removeItem(SESSION_KEY); }}
+            title="Limpiar conversación"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-ink-faint hover:bg-coral-soft hover:text-coral transition-colors cursor-pointer"
+          >
+            <Trash2 size={14} />
+          </button>
+        )}
+      </div>
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
+        {isEmpty && (
+          <div className="flex flex-col items-center gap-4 py-6 text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-violet-soft text-violet">
+              <Sparkles size={22} />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-ink">Hola, soy tu coach personal</p>
+              <p className="text-xs text-ink-soft mt-1 max-w-xs">
+                Conozco tu diario reciente. Pregúntame lo que quieras sobre tus hábitos y productividad.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2 justify-center mt-1">
+              {SUGGESTIONS.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => send(s)}
+                  className="rounded-full border border-line bg-panel px-3 py-1.5 text-xs text-ink-soft hover:border-violet hover:text-violet transition-colors cursor-pointer"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {history.map((msg, i) => (
+          <Message key={i} role={msg.role} content={msg.content} />
+        ))}
+
+        {loading && <TypingIndicator />}
+
+        {error && (
+          <p className="rounded-lg bg-coral-soft px-3 py-2 text-xs text-coral text-center">{error}</p>
+        )}
+
+        <div ref={bottomRef} />
+      </div>
+
+      {/* Input */}
+      <div className="border-t border-line bg-panel p-3">
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+            placeholder="Escribe tu pregunta…"
+            maxLength={1000}
+            className="flex-1 rounded-lg border border-line bg-bg px-3 py-2 text-sm outline-none focus:border-signal"
+          />
+          <button
+            onClick={() => send()}
+            disabled={!input.trim() || loading}
+            className="flex h-9 w-9 items-center justify-center rounded-lg bg-ink text-bg transition-opacity hover:opacity-80 disabled:opacity-40 cursor-pointer"
+          >
+            <Send size={15} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 === frontend\src\components\AppShell.jsx ===
-import { useState } from "react";
-import { NavLink } from "react-router-dom";
-import { LayoutGrid, ListChecks, BarChart3, LogOut, CheckCircle2, UserRound } from "lucide-react";
+import { useState, useEffect } from "react";
+import { NavLink, useLocation } from "react-router-dom";
+import {
+  LayoutGrid, ListChecks, BarChart3, LogOut, CheckCircle2,
+  UserRound, Users, BookOpen, Sparkles, UserCircle, MoreHorizontal, X,
+} from "lucide-react";
 import ThemeToggle from "./ThemeToggle";
 import NotificationToggle from "./NotificationToggle";
 import AccountModal from "./AccountModal";
 import { useAuth } from "../context/AuthContext";
 import { useHabits } from "../hooks/useHabits";
 import { useNotifications } from "../hooks/useNotifications";
+import { useFriends } from "../hooks/useFriends";
 
-const NAV_ITEMS = [
+// Items principales en la bottom bar
+const PRIMARY_NAV = [
   { to: "/", label: "Hoy", icon: LayoutGrid, end: true },
   { to: "/habitos", label: "Hábitos", icon: ListChecks },
-  { to: "/estadisticas", label: "Estadísticas", icon: BarChart3 },
+  { to: "/diario", label: "Diario", icon: BookOpen },
+  { to: "/coach", label: "Coach IA", icon: Sparkles },
 ];
 
-function NavItem({ to, label, icon: Icon, end }) {
+// Items secundarios en el drawer "más"
+const SECONDARY_NAV = [
+  { to: "/estadisticas", label: "Estadísticas", icon: BarChart3 },
+  { to: "/amigos", label: "Amigos", icon: Users },
+  { to: "/perfil-ia", label: "Mi perfil IA", icon: UserCircle },
+];
+
+const ALL_NAV = [...PRIMARY_NAV, ...SECONDARY_NAV];
+
+function SidebarNavItem({ to, label, icon: Icon, end, badge }) {
   return (
     <NavLink
       to={to}
@@ -1401,6 +3129,11 @@ function NavItem({ to, label, icon: Icon, end }) {
     >
       <Icon size={18} strokeWidth={2} />
       {label}
+      {badge > 0 && (
+        <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-coral px-1 font-mono text-[10px] font-bold text-white">
+          {badge}
+        </span>
+      )}
     </NavLink>
   );
 }
@@ -1408,35 +3141,46 @@ function NavItem({ to, label, icon: Icon, end }) {
 export default function AppShell({ children }) {
   const { user, logout } = useAuth();
   const { habits } = useHabits();
-  const { permission, advanceMinutes, requestPermission, setAdvanceMinutes } =
-    useNotifications(habits);
+  const { permission, advanceMinutes, requestPermission, setAdvanceMinutes } = useNotifications(habits);
+  const { pending } = useFriends();
   const [accountOpen, setAccountOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const location = useLocation();
+  const pendingCount = pending.length;
+
+  // Cerrar drawer al navegar
+  useEffect(() => { setDrawerOpen(false); }, [location.pathname]);
+
+  const isSecondaryActive = SECONDARY_NAV.some((item) => location.pathname === item.to);
 
   return (
     <div className="min-h-dvh bg-bg text-ink">
       <div className="mx-auto flex max-w-screen">
-        {/* Sidebar (desktop) */}
+
+        {/* ── Sidebar (desktop) ──────────────────────────────────────────── */}
         <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-line px-4 py-6 md:flex">
           <div className="flex items-center gap-2 px-2 pb-8">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-signal text-panel">
               <CheckCircle2 size={18} strokeWidth={2.5} />
             </span>
-            <span className="font-mono text-[15px] font-semibold tracking-tight">
-              rutina
-            </span>
+            <span className="font-mono text-[15px] font-semibold tracking-tight">rutina</span>
           </div>
 
           <nav className="flex flex-1 flex-col gap-1">
-            {NAV_ITEMS.map((item) => (
-              <NavItem key={item.to} {...item} />
+            {ALL_NAV.map((item) => (
+              <SidebarNavItem
+                key={item.to}
+                {...item}
+                badge={item.to === "/amigos" ? pendingCount : 0}
+              />
             ))}
           </nav>
 
-          <div className="mt-auto flex items-center gap-2 border-t border-line pt-4">
+          <div className="mt-auto flex items-center gap-2 border-t border-line pt-4 rounded-lg transition-colors hover:bg-panel-alt">
             <button
               onClick={() => setAccountOpen(true)}
               title="Configuración de la cuenta"
-              className="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1 text-left transition-colors hover:bg-panel-alt cursor-pointer"
+              className="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1 pl-2 text-left cursor-pointer"
             >
               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-violet-soft font-mono text-xs font-semibold text-violet">
                 {(user?.name || user?.email || "?").slice(0, 1).toUpperCase()}
@@ -1449,15 +3193,14 @@ export default function AppShell({ children }) {
             <button
               onClick={logout}
               aria-label="Cerrar sesión"
-              title="Cerrar sesión"
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-coral-soft hover:text-coral cursor-pointer"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-coral-soft hover:text-coral cursor-pointer mr-1"
             >
               <LogOut size={16} />
             </button>
           </div>
         </aside>
 
-        {/* Main column */}
+        {/* ── Main column ────────────────────────────────────────────────── */}
         <div className="flex min-h-dvh flex-1 flex-col">
           {/* Topbar */}
           <header className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-bg/80 px-5 py-3 backdrop-blur md:justify-end">
@@ -1471,7 +3214,6 @@ export default function AppShell({ children }) {
               <button
                 onClick={() => setAccountOpen(true)}
                 aria-label="Cuenta"
-                title="Cuenta"
                 className="flex h-8 w-8 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-panel-alt hover:text-ink cursor-pointer md:hidden"
               >
                 <UserRound size={17} />
@@ -1490,25 +3232,86 @@ export default function AppShell({ children }) {
             {children}
           </main>
 
-          {/* Bottom nav (mobile) */}
-          <nav className="fixed inset-x-0 bottom-0 z-10 flex items-center justify-around border-t border-line bg-panel px-2 py-2 md:hidden">
-            {NAV_ITEMS.map(({ to, label, icon: Icon, end }) => (
+          {/* ── Bottom nav (mobile) ───────────────────────────────────────── */}
+          <nav className="fixed inset-x-0 bottom-0 z-20 flex items-center border-t border-line bg-panel md:hidden">
+            {PRIMARY_NAV.map(({ to, label, icon: Icon, end }) => (
               <NavLink
                 key={to}
                 to={to}
                 end={end}
                 className={({ isActive }) =>
                   [
-                    "flex flex-col items-center gap-0.5 rounded-lg px-4 py-1.5 text-[11px] font-medium",
+                    "relative flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[11px] font-medium transition-colors",
                     isActive ? "text-signal" : "text-ink-faint",
                   ].join(" ")
                 }
               >
-                <Icon size={19} />
+                <span className="relative">
+                  <Icon size={20} />
+                  {to === "/amigos" && pendingCount > 0 && (
+                    <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-coral px-0.5 font-mono text-[9px] font-bold text-white">
+                      {pendingCount}
+                    </span>
+                  )}
+                </span>
                 {label}
               </NavLink>
             ))}
+
+            {/* Botón "más" */}
+            <button
+              onClick={() => setDrawerOpen((o) => !o)}
+              className={[
+                "relative flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[11px] font-medium transition-colors cursor-pointer",
+                isSecondaryActive || drawerOpen ? "text-signal" : "text-ink-faint",
+              ].join(" ")}
+            >
+              {drawerOpen ? <X size={20} /> : <MoreHorizontal size={20} />}
+              Más
+            </button>
           </nav>
+        </div>
+      </div>
+
+      {/* ── Drawer "más" (mobile) ──────────────────────────────────────────── */}
+      {/* Overlay */}
+      {drawerOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/40 md:hidden"
+          onClick={() => setDrawerOpen(false)}
+        />
+      )}
+
+      {/* Sheet desde abajo */}
+      <div className={[
+        "fixed inset-x-0 bottom-0 z-40 rounded-t-2xl border-t border-line bg-panel px-4 pb-8 pt-4 transition-transform duration-300 md:hidden",
+        drawerOpen ? "translate-y-0" : "translate-y-full",
+      ].join(" ")}>
+        {/* Handle */}
+        <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-line" />
+
+        <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-faint px-1">
+          Más secciones
+        </p>
+
+        <div className="flex flex-col gap-1">
+          {SECONDARY_NAV.map(({ to, label, icon: Icon }) => (
+            <NavLink
+              key={to}
+              to={to}
+              className={({ isActive }) =>
+                [
+                  "flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium transition-colors",
+                  isActive
+                    ? "bg-signal-soft text-signal"
+                    : "text-ink hover:bg-panel-alt",
+                ].join(" ")
+              }
+            >
+              <Icon size={18} />
+              {label}
+            </NavLink>
+          ))}
         </div>
       </div>
 
@@ -1516,7 +3319,6 @@ export default function AppShell({ children }) {
     </div>
   );
 }
-
 
 
 === frontend\src\components\ConfirmDialog.jsx ===
@@ -1698,23 +3500,101 @@ export default function CurrentFocusCard({ habits, logsByHabitId = {}, onSetStat
 
 
 === frontend\src\components\DateNavBar.jsx ===
-import { ChevronLeft, ChevronRight } from "lucide-react";
-import { addDays, formatDateLabel, todayLocalISODate } from "../lib/schedule";
+import { useEffect, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, Calendar } from "lucide-react";
+import {
+  addDays,
+  formatDateLabel,
+  todayLocalISODate,
+  toLocalISODate,
+  DAY_LABELS,
+} from "../lib/schedule";
 import { useAuth } from "../context/AuthContext";
+
+const MONTH_LABELS = [
+  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+];
+
+function parseISO(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function buildMonthGrid(year, month) {
+  const startWeekday = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells = [];
+  for (let i = 0; i < startWeekday; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+  return cells;
+}
 
 export default function DateNavBar({ date, onChange }) {
   const { user } = useAuth();
   const isToday = date === todayLocalISODate();
   const label = formatDateLabel(date);
 
-  // Límite hacia atrás: fecha de creación del usuario
   const minDate = user?.created_at ? user.created_at.slice(0, 10) : todayLocalISODate();
-
   const canGoPrev = date > minDate;
-  const canGoNext = true;
+
+  const [open, setOpen] = useState(false);
+  const [viewYear, setViewYear] = useState(() => parseISO(date).getFullYear());
+  const [viewMonth, setViewMonth] = useState(() => parseISO(date).getMonth());
+
+  const buttonRef = useRef(null);
+  const popoverRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const dt = parseISO(date);
+    setViewYear(dt.getFullYear());
+    setViewMonth(dt.getMonth());
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e) => {
+      if (
+        popoverRef.current && !popoverRef.current.contains(e.target) &&
+        buttonRef.current && !buttonRef.current.contains(e.target)
+      ) {
+        setOpen(false);
+      }
+    };
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const goPrevMonth = () => {
+    if (viewMonth === 0) { setViewYear((y) => y - 1); setViewMonth(11); }
+    else setViewMonth((m) => m - 1);
+  };
+
+  const goNextMonth = () => {
+    if (viewMonth === 11) { setViewYear((y) => y + 1); setViewMonth(0); }
+    else setViewMonth((m) => m + 1);
+  };
+
+  const handlePick = (day) => {
+    if (day == null) return;
+    const iso = toLocalISODate(new Date(viewYear, viewMonth, day));
+    if (iso < minDate) return;
+    onChange(iso);
+    setOpen(false);
+  };
+
+  const cells = buildMonthGrid(viewYear, viewMonth);
+  const today = todayLocalISODate();
 
   return (
-    <div className="flex items-center justify-between gap-2 rounded-2xl border border-line bg-panel px-3 py-2">
+    <div className="relative flex items-center justify-between gap-2 rounded-2xl border border-line bg-panel px-3 py-2">
       <button
         onClick={() => canGoPrev && onChange(addDays(date, -1))}
         disabled={!canGoPrev}
@@ -1725,7 +3605,14 @@ export default function DateNavBar({ date, onChange }) {
       </button>
 
       <div className="flex flex-col items-center">
-        <p className="text-sm font-medium capitalize text-ink">{label}</p>
+        <button
+          ref={buttonRef}
+          onClick={() => setOpen((o) => !o)}
+          className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium capitalize text-ink transition-colors hover:bg-panel-alt cursor-pointer"
+        >
+          <Calendar size={13} className="text-ink-faint" />
+          {label}
+        </button>
         {!isToday && (
           <button
             onClick={() => onChange(todayLocalISODate())}
@@ -1737,13 +3624,77 @@ export default function DateNavBar({ date, onChange }) {
       </div>
 
       <button
-        onClick={() => canGoNext && onChange(addDays(date, 1))}
-        disabled={!canGoNext}
+        onClick={() => onChange(addDays(date, 1))}
         aria-label="Día siguiente"
-        className="flex h-9 w-9 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-panel-alt hover:text-ink cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+        className="flex h-9 w-9 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-panel-alt hover:text-ink cursor-pointer"
       >
         <ChevronRight size={18} />
       </button>
+
+      {open && (
+        <div
+          ref={popoverRef}
+          className="absolute left-1/2 top-full z-20 mt-2 w-72 -translate-x-1/2 rounded-2xl border border-line bg-panel p-3 shadow-[var(--shadow-card)]"
+        >
+          <div className="mb-2 flex items-center justify-between">
+            <button
+              onClick={goPrevMonth}
+              aria-label="Mes anterior"
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-panel-alt hover:text-ink cursor-pointer"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <p className="text-sm font-semibold capitalize">
+              {MONTH_LABELS[viewMonth]} {viewYear}
+            </p>
+            <button
+              onClick={goNextMonth}
+              aria-label="Mes siguiente"
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-panel-alt hover:text-ink cursor-pointer"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-7 gap-1">
+            {DAY_LABELS.map((l) => (
+              <span
+                key={l}
+                className="flex h-7 items-center justify-center text-[10px] font-semibold uppercase text-ink-faint"
+              >
+                {l[0]}
+              </span>
+            ))}
+
+            {cells.map((day, i) => {
+              if (day == null) return <span key={i} />;
+              const iso = toLocalISODate(new Date(viewYear, viewMonth, day));
+              const isSelected = iso === date;
+              const isTodayCell = iso === today;
+              const isDisabled = iso < minDate;
+
+              return (
+                <button
+                  key={i}
+                  onClick={() => handlePick(day)}
+                  disabled={isDisabled}
+                  className={[
+                    "flex h-8 w-8 items-center justify-center rounded-lg text-xs font-medium transition-colors cursor-pointer",
+                    isSelected
+                      ? "bg-signal font-semibold text-panel"
+                      : isTodayCell
+                      ? "border border-signal text-signal"
+                      : "text-ink-soft hover:bg-panel-alt hover:text-ink",
+                    isDisabled && "cursor-not-allowed opacity-30 hover:bg-transparent",
+                  ].filter(Boolean).join(" ")}
+                >
+                  {day}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1751,7 +3702,7 @@ export default function DateNavBar({ date, onChange }) {
 
 === frontend\src\components\DayRail.jsx ===
 import { categoryMeta } from "../lib/categories";
-import { parseDays, toMinutes, formatTime, weekdayOfISODate } from "../lib/schedule";
+import { toMinutes, formatTime, habitOccursOnDate, todayLocalISODate } from "../lib/schedule";
 
 const DAY_MIN = 24 * 60;
 const VIEW_START = 5 * 60 + 30;  // 5:30 AM in minutes
@@ -1795,13 +3746,13 @@ function clipSegment(start, end) {
 }
 
 export default function DayRail({ habits, now, date, showNow = true, completedHabitIds }) {
-  const day = date ? weekdayOfISODate(date) : now.getDay();
+  const resolvedDate = date || todayLocalISODate();
   const nowMinutes = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
   const nowPct = toViewPct(nowMinutes);
   const nowVisible = showNow && nowMinutes >= VIEW_START && nowMinutes <= VIEW_END;
 
   const todays = habits.filter(
-    (h) => h.is_active !== false && parseDays(h.days_of_week).includes(day)
+    (h) => h.is_active !== false && habitOccursOnDate(h, resolvedDate)
   );
 
   return (
@@ -1952,7 +3903,12 @@ export default function HabitCard({ habit, onEdit, onDelete }) {
       </div>
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs text-ink-soft tabular">
-        <span>{formatTime(habit.start_time)} – {formatTime(habit.end_time)}</span>
+        {habit.start_time
+          ? <span>{formatTime(habit.start_time)} – {formatTime(habit.end_time)}</span>
+          : habit.duration_minutes
+            ? <span className="font-sans text-ink-soft">{habit.duration_minutes} min</span>
+            : <span className="font-sans text-ink-faint">Sin hora fija</span>
+        }
         <span
           className="rounded-full px-2 py-0.5 font-sans font-medium"
           style={{ backgroundColor: `var(--${meta.token}-soft)`, color: `var(--${meta.token})` }}
@@ -1961,57 +3917,215 @@ export default function HabitCard({ habit, onEdit, onDelete }) {
         </span>
       </div>
 
-      <div className="flex gap-1">
-        {DAY_LABELS.map((label, i) => (
-          <span
-            key={i}
-            className={[
-              "flex h-6 w-6 items-center justify-center rounded-md text-[10px] font-semibold",
-              days.includes(i)
-                ? "bg-ink text-bg"
-                : "bg-panel-alt text-ink-faint",
-            ].join(" ")}
-          >
-            {label[0]}
-          </span>
-        ))}
-      </div>
+      {habit.recurrence_type === "weekly" || !habit.recurrence_type ? (
+        <div className="flex gap-1">
+          {DAY_LABELS.map((label, i) => (
+            <span
+              key={i}
+              className={[
+                "flex h-6 w-6 items-center justify-center rounded-md text-[10px] font-semibold",
+                days.includes(i)
+                  ? "bg-ink text-bg"
+                  : "bg-panel-alt text-ink-faint",
+              ].join(" ")}
+            >
+              {label[0]}
+            </span>
+          ))}
+        </div>
+      ) : habit.recurrence_type === "interval" ? (
+        <p className="text-xs text-ink-faint">
+          Cada {habit.recurrence_interval} {habit.recurrence_interval === 1 ? "día" : "días"}
+        </p>
+      ) : habit.recurrence_type === "monthly" ? (
+        <p className="text-xs text-ink-faint">
+          {habit.recurrence_day_of_month === -1
+            ? "Último día del mes"
+            : `Día ${habit.recurrence_day_of_month} de cada mes`}
+        </p>
+      ) : null}
     </div>
   );
 }
 
 
 === frontend\src\components\HabitForm.jsx ===
-import { useState } from "react";
-import { CATEGORY_OPTIONS } from "../lib/categories";
+import { useEffect, useRef, useState } from "react";
+import { ChevronDown, Plus, Check } from "lucide-react";
 import { DAY_LABELS } from "../lib/schedule";
+import { useCategories } from "../hooks/useCategories";
 
 const EMPTY = {
   name: "",
   description: "",
-  category: "trabajo",
-  days_of_week: [1, 2, 3, 4, 5], // lun-vie by default
+  category: "",
+  days_of_week: [1, 2, 3, 4, 5],
+  has_time: false,
   start_time: "08:00",
   end_time: "09:00",
+  duration_minutes: "",
+  start_date: "",
+  recurrence_type: "weekly",
+  recurrence_interval: 2,
+  recurrence_day_of_month: 1,
 };
 
-export default function HabitForm({ initial, onSubmit, onCancel, submitLabel = "Guardar hábito" }) {
-  const [form, setForm] = useState(() =>
-    initial
-      ? {
-          ...EMPTY,
-          ...initial,
-          days_of_week: Array.isArray(initial.days_of_week)
-            ? initial.days_of_week
-            : (initial.days_of_week || "")
-                .split(",")
-                .filter(Boolean)
-                .map(Number),
-        }
-      : EMPTY
+const RECURRENCE_LABELS = {
+  weekly:   "Días de la semana",
+  interval: "Cada N días",
+  monthly:  "Día del mes",
+};
+
+// ── Category dropdown ─────────────────────────────────────────────────────────
+function CategorySelect({ value, onChange }) {
+  const { displayCategories, addCategory, deleteCategory } = useCategories();
+  const [open, setOpen] = useState(false);
+  const [newCat, setNewCat] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(null); // category id
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) {
+        setOpen(false);
+        setConfirmDelete(null);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const handleSelect = (cat) => { onChange(cat.name); setOpen(false); setConfirmDelete(null); };
+
+  const handleAdd = async () => {
+    const trimmed = newCat.trim();
+    if (!trimmed) return;
+    const cat = await addCategory(trimmed);
+    onChange(cat.name);
+    setNewCat("");
+    setOpen(false);
+  };
+
+  const handleDelete = async (cat) => {
+    if (cat.id < 0) return;
+    try {
+      await deleteCategory(cat.id);
+      if (value === cat.name) onChange("");
+    } catch (err) {
+      console.error("Error eliminando categoría:", err?.response?.status, err?.response?.data);
+    } finally {
+      setConfirmDelete(null);
+    }
+  };
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => { setOpen((o) => !o); setConfirmDelete(null); }}
+        className="flex w-full items-center justify-between rounded-lg border border-line bg-bg px-3 py-2 text-sm outline-none focus:border-signal cursor-pointer"
+      >
+        <span className={value ? "text-ink" : "text-ink-faint"}>
+          {value || "Selecciona o crea una categoría"}
+        </span>
+        <ChevronDown size={15} className={`text-ink-faint transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="absolute left-0 right-0 top-full z-30 mt-1 rounded-xl border border-line bg-panel shadow-[var(--shadow-card)]">
+          <ul className="max-h-48 overflow-y-auto py-1">
+            {displayCategories.map((cat) => (
+              <li key={cat.id}>
+                {confirmDelete === cat.id ? (
+                  <div className="px-3 py-2 bg-coral-soft">
+                    <p className="mb-1.5 text-xs text-coral font-medium">
+                      ¿Eliminar "{cat.name}"? Los hábitos que la tienen la seguirán teniendo hasta que los edites.
+                    </p>
+                    <div className="flex gap-2">
+                      <button type="button"
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          handleDelete(cat);
+                        }}
+                        className="flex-1 rounded-lg bg-coral py-1 text-xs font-semibold text-white cursor-pointer">
+                        Sí, eliminar
+                      </button>
+                      <button type="button"
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          setConfirmDelete(null);
+                        }}
+                        className="flex-1 rounded-lg border border-line py-1 text-xs font-medium text-ink-soft cursor-pointer">
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center">
+                    <button type="button" onClick={() => handleSelect(cat)}
+                      className="flex flex-1 items-center justify-between px-3 py-2 text-sm text-ink hover:bg-panel-alt cursor-pointer">
+                      {cat.name}
+                      {value === cat.name && <Check size={13} className="text-signal" />}
+                    </button>
+                    <button type="button"
+                      onClick={(e) => { e.stopPropagation(); setConfirmDelete(cat.id); }}
+                      className="mr-2 flex h-5 w-5 items-center justify-center rounded text-ink-faint hover:bg-coral-soft hover:text-coral cursor-pointer text-xs"
+                      title="Eliminar categoría">
+                      ×
+                    </button>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+          <div className="border-t border-line p-2">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={newCat}
+                onChange={(e) => setNewCat(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAdd(); } }}
+                placeholder="Nueva categoría…"
+                className="flex-1 rounded-lg border border-line bg-bg px-2 py-1.5 text-xs outline-none focus:border-signal"
+              />
+              <button type="button" onClick={handleAdd} disabled={!newCat.trim()}
+                className="flex items-center gap-1 rounded-lg bg-signal px-2 py-1.5 text-xs font-semibold text-panel disabled:opacity-40 cursor-pointer">
+                <Plus size={12} />
+                Agregar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
+}
+
+// ── Main form ─────────────────────────────────────────────────────────────────
+export default function HabitForm({ initial, onSubmit, onCancel, submitLabel = "Guardar hábito" }) {
+  const [form, setForm] = useState(() => {
+    if (!initial) return EMPTY;
+    return {
+      ...EMPTY,
+      ...initial,
+      has_time: !!(initial.start_time),
+      duration_minutes: initial.duration_minutes ? String(initial.duration_minutes) : "",
+      days_of_week: Array.isArray(initial.days_of_week)
+        ? initial.days_of_week
+        : (initial.days_of_week || "").split(",").filter(Boolean).map(Number),
+      start_date: initial.start_date ? String(initial.start_date).slice(0, 10) : "",
+      recurrence_type: initial.recurrence_type || "weekly",
+      recurrence_interval: initial.recurrence_interval || 2,
+      recurrence_day_of_month: initial.recurrence_day_of_month || 1,
+    };
+  });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+
+  const set = (key, val) => setForm((f) => ({ ...f, [key]: val }));
 
   const toggleDay = (d) => {
     setForm((f) => ({
@@ -2025,19 +4139,28 @@ export default function HabitForm({ initial, onSubmit, onCancel, submitLabel = "
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
-    if (!form.name.trim()) {
-      setError("Ponle un nombre al hábito.");
-      return;
+    if (!form.name.trim()) { setError("Ponle un nombre al hábito."); return; }
+    if (!form.category.trim()) { setError("Selecciona o crea una categoría."); return; }
+    if (form.recurrence_type === "weekly" && form.days_of_week.length === 0) {
+      setError("Selecciona al menos un día."); return;
     }
-    if (form.days_of_week.length === 0) {
-      setError("Selecciona al menos un día.");
-      return;
+    if (form.recurrence_type === "interval" && (!form.recurrence_interval || form.recurrence_interval < 1)) {
+      setError("El intervalo debe ser al menos 1 día."); return;
+    }
+    if (form.recurrence_type === "monthly" && !form.recurrence_day_of_month) {
+      setError("Selecciona el día del mes."); return;
     }
     setSaving(true);
     try {
       await onSubmit({
         ...form,
-        days_of_week: form.days_of_week.join(","),
+        start_time: form.has_time ? form.start_time : null,
+        end_time: form.has_time ? form.end_time : null,
+        duration_minutes: !form.has_time && form.duration_minutes ? Number(form.duration_minutes) : null,
+        days_of_week: form.recurrence_type === "weekly" ? form.days_of_week.join(",") : "0",
+        recurrence_interval: form.recurrence_type === "interval" ? Number(form.recurrence_interval) : null,
+        recurrence_day_of_month: form.recurrence_type === "monthly" ? Number(form.recurrence_day_of_month) : null,
+        start_date: form.start_date || null,
       });
     } catch (err) {
       setError(err?.response?.data?.detail || "No se pudo guardar el hábito.");
@@ -2046,123 +4169,176 @@ export default function HabitForm({ initial, onSubmit, onCancel, submitLabel = "
     }
   };
 
-  const inputClass =
-    "w-full rounded-lg border border-line bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-signal";
+  const inputClass = "w-full rounded-lg border border-line bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-signal";
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+
       <div>
-        <label className="mb-1 block text-xs font-medium text-ink-soft">
-          Nombre
-        </label>
-        <input
-          className={inputClass}
-          value={form.name}
-          onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-          placeholder="Ej. Deep work: proyecto"
-          autoFocus
-        />
+        <label className="mb-1 block text-xs font-medium text-ink-soft">Nombre</label>
+        <input className={inputClass} value={form.name}
+          onChange={(e) => set("name", e.target.value)}
+          placeholder="Ej. Deep work: proyecto" autoFocus />
       </div>
 
       <div>
         <label className="mb-1 block text-xs font-medium text-ink-soft">
-          Descripción (opcional)
+          Descripción <span className="text-ink-faint">(opcional)</span>
         </label>
-        <input
-          className={inputClass}
-          value={form.description}
-          onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-          placeholder="Detalle corto"
-        />
+        <input className={inputClass} value={form.description}
+          onChange={(e) => set("description", e.target.value)}
+          placeholder="Detalle corto" />
       </div>
 
       <div>
-        <label className="mb-1 block text-xs font-medium text-ink-soft">
-          Categoría
-        </label>
-        <select
-          className={inputClass}
-          value={form.category}
-          onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
-        >
-          {CATEGORY_OPTIONS.map((c) => (
-            <option key={c.value} value={c.value}>
-              {c.label}
-            </option>
+        <label className="mb-1 block text-xs font-medium text-ink-soft">Categoría</label>
+        <CategorySelect value={form.category} onChange={(v) => set("category", v)} />
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-medium text-ink-soft">Hora fija</label>
+          <button
+            type="button"
+            onClick={() => set("has_time", !form.has_time)}
+            className={[
+              "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors",
+              form.has_time ? "bg-signal" : "bg-panel-alt",
+            ].join(" ")}
+            role="switch"
+            aria-checked={form.has_time}
+          >
+            <span
+              className={[
+                "pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transition-transform",
+                form.has_time ? "translate-x-4" : "translate-x-0",
+              ].join(" ")}
+            />
+          </button>
+        </div>
+        {form.has_time && (
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-ink-soft">Hora inicio</label>
+              <input type="time" className={inputClass} value={form.start_time}
+                onChange={(e) => set("start_time", e.target.value)} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-ink-soft">Hora fin</label>
+              <input type="time" className={inputClass} value={form.end_time}
+                onChange={(e) => set("end_time", e.target.value)} />
+            </div>
+          </div>
+        )}
+        {!form.has_time && (
+          <div className="mt-3 flex items-center gap-3">
+            <input
+              type="number"
+              min={1}
+              max={480}
+              value={form.duration_minutes}
+              onChange={(e) => set("duration_minutes", e.target.value)}
+              placeholder="30"
+              className="w-20 rounded-lg border border-line bg-bg px-3 py-2 text-center text-sm text-ink outline-none focus:border-signal"
+            />
+            <span className="text-sm text-ink-soft">minutos objetivo <span className="text-ink-faint">(opcional)</span></span>
+          </div>
+        )}
+      </div>
+
+      <div>
+        <label className="mb-1.5 block text-xs font-medium text-ink-soft">Frecuencia</label>
+        <div className="flex rounded-lg border border-line overflow-hidden">
+          {Object.entries(RECURRENCE_LABELS).map(([type, label]) => (
+            <button key={type} type="button" onClick={() => set("recurrence_type", type)}
+              className={["flex-1 py-2 text-xs font-semibold transition-colors cursor-pointer",
+                form.recurrence_type === type ? "bg-signal text-panel" : "bg-panel-alt text-ink-faint hover:text-ink",
+              ].join(" ")}>
+              {label}
+            </button>
           ))}
-        </select>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="mb-1 block text-xs font-medium text-ink-soft">
-            Hora inicio
-          </label>
-          <input
-            type="time"
-            className={inputClass}
-            value={form.start_time}
-            onChange={(e) => setForm((f) => ({ ...f, start_time: e.target.value }))}
-          />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-ink-soft">
-            Hora fin
-          </label>
-          <input
-            type="time"
-            className={inputClass}
-            value={form.end_time}
-            onChange={(e) => setForm((f) => ({ ...f, end_time: e.target.value }))}
-          />
         </div>
       </div>
 
-      <div>
-        <label className="mb-1.5 block text-xs font-medium text-ink-soft">
-          Días de la semana
-        </label>
-        <div className="flex gap-1.5">
-          {DAY_LABELS.map((label, i) => {
-            const active = form.days_of_week.includes(i);
-            return (
-              <button
-                type="button"
-                key={i}
-                onClick={() => toggleDay(i)}
-                className={[
-                  "h-9 flex-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer",
-                  active
-                    ? "bg-signal text-panel"
-                    : "bg-panel-alt text-ink-faint hover:text-ink-soft",
-                ].join(" ")}
-              >
+      {form.recurrence_type === "weekly" && (
+        <div>
+          <label className="mb-1.5 block text-xs font-medium text-ink-soft">Días de la semana</label>
+          <div className="flex gap-1.5">
+            {DAY_LABELS.map((label, i) => (
+              <button type="button" key={i} onClick={() => toggleDay(i)}
+                className={["h-9 flex-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer",
+                  form.days_of_week.includes(i) ? "bg-signal text-panel" : "bg-panel-alt text-ink-faint hover:text-ink-soft",
+                ].join(" ")}>
                 {label}
               </button>
-            );
-          })}
+            ))}
+          </div>
         </div>
-      </div>
-
-      {error && (
-        <p className="rounded-lg bg-coral-soft px-3 py-2 text-sm text-coral">
-          {error}
-        </p>
       )}
 
+      {form.recurrence_type === "interval" && (
+        <div>
+          <label className="mb-1 block text-xs font-medium text-ink-soft">Repetir cada cuántos días</label>
+          <div className="flex items-center gap-3">
+            <input type="number" min={1} max={365}
+              className="w-24 rounded-lg border border-line bg-bg px-3 py-2 text-center text-sm text-ink outline-none focus:border-signal"
+              value={form.recurrence_interval} onChange={(e) => set("recurrence_interval", e.target.value)} />
+            <span className="text-sm text-ink-soft">días</span>
+          </div>
+          <p className="mt-1 text-xs text-ink-faint">
+            Se repite cada N días desde la fecha de inicio.
+          </p>
+        </div>
+      )}
+
+      {form.recurrence_type === "monthly" && (
+        <div>
+          <label className="mb-1 block text-xs font-medium text-ink-soft">Día del mes</label>
+          <div className="flex flex-wrap gap-1.5">
+            {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
+              <button key={d} type="button" onClick={() => set("recurrence_day_of_month", d)}
+                className={["h-8 w-8 rounded-lg text-xs font-semibold transition-colors cursor-pointer",
+                  form.recurrence_day_of_month === d ? "bg-signal text-panel" : "bg-panel-alt text-ink-faint hover:text-ink",
+                ].join(" ")}>
+                {d}
+              </button>
+            ))}
+            <button type="button" onClick={() => set("recurrence_day_of_month", -1)}
+              className={["rounded-lg px-3 text-xs font-semibold transition-colors cursor-pointer",
+                form.recurrence_day_of_month === -1 ? "bg-signal text-panel" : "bg-panel-alt text-ink-faint hover:text-ink",
+              ].join(" ")}>
+              Último
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div>
+        <label className="mb-1 block text-xs font-medium text-ink-soft">
+          Fecha de inicio <span className="text-ink-faint">(opcional)</span>
+        </label>
+        <input type="date" className={inputClass} value={form.start_date}
+          onChange={(e) => set("start_date", e.target.value)} />
+        {form.start_date && (
+          <button type="button" onClick={() => set("start_date", "")}
+            className="mt-1 text-xs text-ink-faint hover:text-coral cursor-pointer">
+            Quitar fecha de inicio
+          </button>
+        )}
+        <p className="mt-1 text-xs text-ink-faint">
+          {form.recurrence_type === "interval" ? "Marca el primer día del ciclo." : "Si no pones fecha, el hábito empieza hoy."}
+        </p>
+      </div>
+
+      {error && <p className="rounded-lg bg-coral-soft px-3 py-2 text-sm text-coral">{error}</p>}
+
       <div className="mt-1 flex gap-2">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="flex-1 rounded-lg border border-line py-2.5 text-sm font-medium text-ink-soft transition-colors hover:bg-panel-alt cursor-pointer"
-        >
+        <button type="button" onClick={onCancel}
+          className="flex-1 rounded-lg border border-line py-2.5 text-sm font-medium text-ink-soft transition-colors hover:bg-panel-alt cursor-pointer">
           Cancelar
         </button>
-        <button
-          type="submit"
-          disabled={saving}
-          className="flex-1 rounded-lg bg-ink py-2.5 text-sm font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-60 cursor-pointer"
-        >
+        <button type="submit" disabled={saving}
+          className="flex-1 rounded-lg bg-ink py-2.5 text-sm font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-60 cursor-pointer">
           {saving ? "Guardando…" : submitLabel}
         </button>
       </div>
@@ -2399,7 +4575,7 @@ export default function ThemeToggle() {
 === frontend\src\components\TodayChecklist.jsx ===
 import { Check, X, MinusCircle } from "lucide-react";
 import { categoryMeta } from "../lib/categories";
-import { formatTime, parseDays, toMinutes, todayLocalISODate, weekdayOfISODate } from "../lib/schedule";
+import { formatTime, toMinutes, todayLocalISODate, habitOccursOnDate } from "../lib/schedule";
 
 const STATUS_CONFIG = {
   done: {
@@ -2425,11 +4601,17 @@ const STATUS_CONFIG = {
 export default function TodayChecklist({ habits, logsByHabitId = {}, onSetStatus, date }) {
   const resolvedDate = date || todayLocalISODate();
   const isFuture = resolvedDate > todayLocalISODate();
-  const weekday = weekdayOfISODate(resolvedDate);
 
   const todays = habits
-    .filter((h) => h.is_active !== false && parseDays(h.days_of_week).includes(weekday))
-    .sort((a, b) => toMinutes(a.start_time) - toMinutes(b.start_time));
+    .filter((h) => h.is_active !== false && habitOccursOnDate(h, resolvedDate))
+    .sort((a, b) => {
+      const aMin = toMinutes(a.start_time);
+      const bMin = toMinutes(b.start_time);
+      if (aMin == null && bMin == null) return 0;
+      if (aMin == null) return 1;
+      if (bMin == null) return -1;
+      return aMin - bMin;
+    });
 
   if (todays.length === 0) {
     return (
@@ -2473,38 +4655,41 @@ export default function TodayChecklist({ habits, logsByHabitId = {}, onSetStatus
               ].join(" ")}>
                 {habit.name}
               </p>
-              <p className="font-mono text-xs text-ink-faint tabular">
-                {formatTime(habit.start_time)} – {formatTime(habit.end_time)}
-              </p>
+              {habit.start_time ? (
+                <p className="font-mono text-xs text-ink-faint tabular">
+                  {formatTime(habit.start_time)} – {formatTime(habit.end_time)}
+                </p>
+              ) : habit.duration_minutes ? (
+                <p className="text-xs text-ink-faint">{habit.duration_minutes} min</p>
+              ) : null}
             </div>
 
-            {/* Status buttons */}
-            <div className="flex shrink-0 gap-1">
-              {Object.entries(STATUS_CONFIG).map(([statusKey, cfg]) => {
-                const BtnIcon = cfg.icon;
-                const isActive = currentStatus === statusKey;
+            {/* Status buttons — ocultos en fechas futuras */}
+            {!isFuture && (
+              <div className="flex shrink-0 gap-1">
+                {Object.entries(STATUS_CONFIG).map(([statusKey, cfg]) => {
+                  const BtnIcon = cfg.icon;
+                  const isActive = currentStatus === statusKey;
 
-                return (
-                  <button
-                    key={statusKey}
-                    disabled={isFuture}
-                    onClick={() => onSetStatus(habit.id, isActive ? null : statusKey)}
-                    aria-label={cfg.label}
-                    title={cfg.label}
-                    className={[
-                      "flex h-7 w-7 items-center justify-center rounded-full border-2 transition-colors",
-                      isFuture
-                        ? "cursor-not-allowed border-line text-transparent opacity-30"
-                        : isActive
-                        ? `cursor-pointer ${cfg.activeClass}`
-                        : `cursor-pointer border-line text-transparent ${cfg.hoverClass}`,
-                    ].join(" ")}
-                  >
-                    <BtnIcon size={13} strokeWidth={2.5} />
-                  </button>
-                );
-              })}
-            </div>
+                  return (
+                    <button
+                      key={statusKey}
+                      onClick={() => onSetStatus(habit.id, isActive ? null : statusKey)}
+                      aria-label={cfg.label}
+                      title={cfg.label}
+                      className={[
+                        "flex h-7 w-7 items-center justify-center rounded-full border-2 transition-colors cursor-pointer",
+                        isActive
+                          ? `${cfg.activeClass}`
+                          : `border-line text-transparent ${cfg.hoverClass}`,
+                      ].join(" ")}
+                    >
+                      <BtnIcon size={13} strokeWidth={2.5} />
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </li>
         );
       })}
@@ -2532,8 +4717,12 @@ export function AuthProvider({ children }) {
     try {
       const res = await api.get("/auth/me");
       setUser(res.data);
-    } catch {
-      setUser(null);
+    } catch (err) {
+      // Solo limpiar sesión en 401, no en timeouts u otros errores de red
+      if (err?.response?.status === 401) {
+        setToken(null);
+        setUser(null);
+      }
     } finally {
       setLoading(false);
     }
@@ -2637,6 +4826,112 @@ export function useTheme() {
   const ctx = useContext(ThemeContext);
   if (!ctx) throw new Error("useTheme must be used within ThemeProvider");
   return ctx;
+}
+
+
+=== frontend\src\hooks\useCategories.js ===
+import { useCallback, useEffect, useState } from "react";
+import api from "../api/client";
+
+export function useCategories() {
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await api.get("/categories");
+      setCategories(res.data);
+    } catch {
+      setCategories([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const addCategory = async (name) => {
+    const res = await api.post("/categories", { name });
+    setCategories((prev) => {
+      if (prev.find((c) => c.id === res.data.id)) return prev;
+      return [...prev, res.data].sort((a, b) => a.name.localeCompare(b.name));
+    });
+    return res.data;
+  };
+
+  const deleteCategory = async (id) => {
+    await api.delete(`/categories/${id}`);
+    setCategories((prev) => prev.filter((c) => c.id !== id));
+  };
+
+  return { categories, displayCategories: categories, loading, addCategory, deleteCategory, refresh };
+}
+
+
+=== frontend\src\hooks\useFriends.js ===
+import { useCallback, useEffect, useState } from "react";
+import api from "../api/client";
+
+export function useFriends() {
+  const [friendships, setFriendships] = useState([]);
+  const [leaderboard, setLeaderboard] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [friendsRes, lbRes] = await Promise.all([
+        api.get("/friends"),
+        api.get("/friends/leaderboard"),
+      ]);
+      setFriendships(friendsRes.data);
+      setLeaderboard(lbRes.data);
+    } catch (err) {
+      setError(err?.response?.data?.detail || "No se pudo cargar.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const sendRequest = async (email) => {
+    await api.post("/friends/request", { email });
+    await refresh();
+  };
+
+  const acceptRequest = async (id) => {
+    await api.put(`/friends/${id}/accept`);
+    await refresh();
+  };
+
+  const rejectRequest = async (id) => {
+    await api.put(`/friends/${id}/reject`);
+    await refresh();
+  };
+
+  const removeFriend = async (id) => {
+    await api.delete(`/friends/${id}`);
+    await refresh();
+  };
+
+  const pending = friendships.filter(
+    (f) => f.status === "pending" && !f.i_am_requester
+  );
+  const accepted = friendships.filter((f) => f.status === "accepted");
+  const sent = friendships.filter(
+    (f) => f.status === "pending" && f.i_am_requester
+  );
+
+  return {
+    friendships, leaderboard, loading, error,
+    pending, accepted, sent,
+    sendRequest, acceptRequest, rejectRequest, removeFriend,
+    refresh,
+  };
 }
 
 
@@ -2746,9 +5041,68 @@ export function useHabits(date) {
 }
 
 
+=== frontend\src\hooks\useJournal.js ===
+import { useCallback, useEffect, useState } from "react";
+import api from "../api/client";
+
+export function useJournal() {
+  const [entries, setEntries] = useState([]);
+  const [summaries, setSummaries] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await api.get("/journal");
+      setEntries(res.data.entries);
+      setSummaries(res.data.summaries);
+    } catch {
+      setError("No se pudo cargar el diario.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    // El backend genera resúmenes pendientes en background al abrir el diario.
+    // Refrescamos a los 5 s para que aparezcan sin que el usuario recargue la página.
+    const timer = setTimeout(() => refresh(), 5000);
+    return () => clearTimeout(timer);
+  }, [refresh]);
+
+  const saveEntry = async (content, entryDate) => {
+    const res = await api.put("/journal/entry", { content, entry_date: entryDate });
+    setEntries((prev) => {
+      const idx = prev.findIndex((e) => e.entry_date === entryDate);
+      if (idx >= 0) {
+        const updated = [...prev];
+        updated[idx] = res.data;
+        return updated;
+      }
+      return [res.data, ...prev];
+    });
+    return res.data;
+  };
+
+  const deleteEntry = async (entryDate) => {
+    await api.delete(`/journal/entry/${entryDate}`);
+    setEntries((prev) => prev.filter((e) => e.entry_date !== entryDate));
+    // Quitar también el resumen del día del estado local
+    setSummaries((prev) => prev.filter((s) => s.date_from !== entryDate));
+  };
+
+  const getEntry = (dateStr) => entries.find((e) => e.entry_date === dateStr) || null;
+
+  return { entries, summaries, loading, error, refresh, saveEntry, deleteEntry, getEntry };
+}
+
+
 === frontend\src\hooks\useNotifications.js ===
 import { useCallback, useEffect, useRef, useState } from "react";
-import { parseDays, toMinutes } from "../lib/schedule";
+import { habitOccursOnDate, toLocalISODate, toMinutes } from "../lib/schedule";
 
 const STORAGE_KEY = "rutina_notif_minutes";
 const DEFAULT_MINUTES = 15;
@@ -2839,13 +5193,13 @@ export function useNotifications(habits) {
 
     const check = () => {
       const now = new Date();
-      const day = now.getDay();
+      const isoDate = toLocalISODate(now);
       const nowMinutes = now.getHours() * 60 + now.getMinutes();
       const dateKey = now.toISOString().slice(0, 10);
 
       habits.forEach((habit) => {
         if (habit.is_active === false) return;
-        if (!parseDays(habit.days_of_week).includes(day)) return;
+        if (!habitOccursOnDate(habit, isoDate)) return;
 
         const start = toMinutes(habit.start_time);
         if (start == null) return;
@@ -2891,6 +5245,50 @@ export function useNow(intervalMs = 30000) {
   }, [intervalMs]);
 
   return now;
+}
+
+
+=== frontend\src\hooks\useProfile.js ===
+import { useCallback, useEffect, useState } from "react";
+import api from "../api/client";
+
+export function useProfile() {
+  const [bio, setBio] = useState("");
+  const [bioSummary, setBioSummary] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await api.get("/profile");
+      setBio(res.data.bio || "");
+      setBioSummary(res.data.bio_summary || null);
+    } catch {
+      setError("No se pudo cargar el perfil.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const saveBio = async (text) => {
+    const res = await api.put("/profile", { bio: text });
+    setBio(res.data.bio);
+    setBioSummary(res.data.bio_summary);
+    return res.data;
+  };
+
+  const summarizeBio = async () => {
+    const res = await api.post("/profile/summarize");
+    setBio(res.data.bio);
+    setBioSummary(res.data.bio_summary);
+    return res.data;
+  };
+
+  return { bio, bioSummary, loading, error, saveBio, summarizeBio };
 }
 
 
@@ -3081,7 +5479,11 @@ export const CATEGORIES = {
 };
 
 export function categoryMeta(key) {
-  return CATEGORIES[key] || CATEGORIES.otro;
+  if (CATEGORIES[key]) return CATEGORIES[key];
+  // Custom category — cycle through available tokens for variety
+  const tokens = ["signal", "violet", "mint", "sky", "coral"];
+  const index = key ? Math.abs(key.split("").reduce((a, c) => a + c.charCodeAt(0), 0)) % tokens.length : 0;
+  return { label: key || "Otro", icon: Sparkles, token: tokens[index] };
 }
 
 export const CATEGORY_OPTIONS = Object.entries(CATEGORIES).map(([value, v]) => ({
@@ -3136,10 +5538,51 @@ export function formatDuration(startMinutes, endMinutes) {
   return `${h} h ${m} min`;
 }
 
+/**
+ * Returns true if a habit is scheduled to occur on a given ISO date string.
+ * Handles all three recurrence types: weekly, interval, monthly.
+ */
+export function habitOccursOnDate(habit, isoDate) {
+  const type = habit.recurrence_type || "weekly";
+
+  if (type === "weekly") {
+    const weekday = weekdayOfISODate(isoDate);
+    return parseDays(habit.days_of_week).includes(weekday);
+  }
+
+  if (type === "interval") {
+    const interval = habit.recurrence_interval;
+    if (!interval || interval < 1) return false;
+    // Need a reference date — use start_date if set, otherwise created_at date
+    const refRaw = habit.start_date || (habit.created_at ? habit.created_at.slice(0, 10) : null);
+    if (!refRaw) return false;
+    const ref = refRaw.slice(0, 10);
+    const [ry, rm, rd] = ref.split("-").map(Number);
+    const [ty, tm, td] = isoDate.split("-").map(Number);
+    const refMs = new Date(ry, rm - 1, rd).getTime();
+    const targetMs = new Date(ty, tm - 1, td).getTime();
+    const diffDays = Math.round((targetMs - refMs) / 86400000);
+    return diffDays >= 0 && diffDays % interval === 0;
+  }
+
+  if (type === "monthly") {
+    const dom = habit.recurrence_day_of_month;
+    if (dom == null) return false;
+    const [y, m, d] = isoDate.split("-").map(Number);
+    if (dom === -1) {
+      // last day of month
+      const lastDay = new Date(y, m, 0).getDate();
+      return d === lastDay;
+    }
+    return d === dom;
+  }
+
+  return false;
+}
+
 export function habitStatusNow(habit, now = new Date()) {
-  const day = now.getDay();
-  const days = parseDays(habit.days_of_week);
-  if (!days.includes(day)) return "not-scheduled";
+  const isoDate = toLocalISODate(now);
+  if (!habitOccursOnDate(habit, isoDate)) return "not-scheduled";
 
   const nowMinutes = now.getHours() * 60 + now.getMinutes();
   const start = toMinutes(habit.start_time);
@@ -3224,6 +5667,24 @@ createRoot(document.getElementById("root")).render(
 );
 
 
+=== frontend\src\pages\Coach.jsx ===
+import AIChat from "../components/AIChat";
+
+export default function Coach() {
+  return (
+    <div className="flex flex-col gap-4 max-w-2xl">
+      <div>
+        <h1 className="text-lg font-semibold">Coach IA</h1>
+        <p className="text-sm text-ink-soft mt-0.5">
+          Tu coach personal conoce tus hábitos y tu diario reciente. Pregúntale lo que quieras.
+        </p>
+      </div>
+      <AIChat />
+    </div>
+  );
+}
+
+
 === frontend\src\pages\Dashboard.jsx ===
 import { useState } from "react";
 import CurrentFocusCard from "../components/CurrentFocusCard";
@@ -3232,12 +5693,18 @@ import StatCard from "../components/StatCard";
 import DateNavBar from "../components/DateNavBar";
 import { useHabits } from "../hooks/useHabits";
 import { useStats } from "../hooks/useStats";
-import { parseDays, todayLocalISODate, toLocalISODate, weekdayOfISODate } from "../lib/schedule";
+import { todayLocalISODate, toLocalISODate, habitOccursOnDate } from "../lib/schedule";
 
 export default function Dashboard() {
   const [selectedDate, setSelectedDate] = useState(todayLocalISODate());
-  const { habits: allHabits, completedHabitIds, logsByHabitId, loading, error, setHabitStatus } = useHabits(selectedDate);
-  const { summary } = useStats();
+  const { habits: allHabits, completedHabitIds, logsByHabitId, loading, error, setHabitStatus, refresh: refreshHabits } = useHabits(selectedDate);
+  const { summary, refresh: refreshStats } = useStats();
+
+  // Wrapper que actualiza el estado del hábito y luego refresca las stats
+  const handleSetStatus = async (habitId, status) => {
+    await setHabitStatus(habitId, status);
+    refreshStats();
+  };
 
   // Excluir hábitos que no existían en la fecha seleccionada.
   // created_at viene del backend en UTC (sin sufijo de zona), así que hay que
@@ -3253,13 +5720,16 @@ export default function Dashboard() {
     const parsed = new Date(hasZone ? raw : raw + "Z");
     if (isNaN(parsed.getTime())) return true; // si no se puede parsear, incluir el hábito
     const createdLocal = toLocalISODate(parsed);
-    return createdLocal <= selectedDate;
+    // Si tiene start_date explícita, usarla como límite; si no, usar created_at
+    const effectiveStart = h.start_date
+      ? String(h.start_date).slice(0, 10)
+      : createdLocal;
+    return effectiveStart <= selectedDate;
   });
 
   const isToday = selectedDate === todayLocalISODate();
-  const weekday = weekdayOfISODate(selectedDate);
   const scheduledToday = habits.filter(
-    (h) => h.is_active !== false && parseDays(h.days_of_week).includes(weekday)
+    (h) => h.is_active !== false && habitOccursOnDate(h, selectedDate)
   );
   const doneToday = scheduledToday.filter((h) => completedHabitIds.has(h.id)).length;
   const pct = scheduledToday.length ? Math.round((doneToday / scheduledToday.length) * 100) : 0;
@@ -3277,7 +5747,7 @@ export default function Dashboard() {
           <CurrentFocusCard
             habits={habits}
             logsByHabitId={logsByHabitId}
-            onSetStatus={setHabitStatus}
+            onSetStatus={handleSetStatus}
             date={selectedDate}
           />
 
@@ -3309,12 +5779,330 @@ export default function Dashboard() {
             <TodayChecklist
               habits={habits}
               logsByHabitId={logsByHabitId}
-              onSetStatus={setHabitStatus}
+              onSetStatus={handleSetStatus}
               date={selectedDate}
             />
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+
+=== frontend\src\pages\ForgotPassword.jsx ===
+import { useState } from "react";
+import { Link } from "react-router-dom";
+import { CheckCircle2 } from "lucide-react";
+import api from "../api/client";
+import ThemeToggle from "../components/ThemeToggle";
+
+export default function ForgotPassword() {
+  const [email, setEmail] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      await api.post("/auth/forgot-password", { email });
+      setSent(true);
+    } catch {
+      setError("Ocurrió un error. Intenta de nuevo.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-bg px-4 py-10">
+      <div className="absolute right-4 top-4">
+        <ThemeToggle />
+      </div>
+      <div className="w-full max-w-sm">
+        <div className="mb-8 flex flex-col items-center gap-2 text-center">
+          <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-signal text-panel">
+            <CheckCircle2 size={22} strokeWidth={2.5} />
+          </span>
+          <h1 className="font-mono text-xl font-semibold tracking-tight">rutina</h1>
+          <p className="text-sm text-ink-soft">Recupera tu contraseña</p>
+        </div>
+
+        <div className="rounded-2xl border border-line bg-panel p-6 shadow-[var(--shadow-card)]">
+          {sent ? (
+            <div className="flex flex-col items-center gap-3 text-center py-2">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-signal/10">
+                <CheckCircle2 size={20} className="text-signal" />
+              </div>
+              <p className="text-sm font-medium text-ink">Revisa tu correo</p>
+              <p className="text-xs text-ink-soft">
+                Si <strong>{email}</strong> tiene una cuenta, recibirás un enlace para restablecer tu contraseña. El enlace expira en 1 hora.
+              </p>
+            </div>
+          ) : (
+            <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+              <p className="text-sm text-ink-soft">
+                Ingresa tu correo y te enviaremos un enlace para crear una nueva contraseña.
+              </p>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-ink-soft">
+                  Correo electrónico
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full rounded-lg border border-line bg-bg px-3 py-2.5 text-sm outline-none focus:border-signal"
+                  placeholder="tu@correo.com"
+                  autoFocus
+                />
+              </div>
+
+              {error && (
+                <p className="rounded-lg bg-coral-soft px-3 py-2 text-sm text-coral">{error}</p>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="mt-1 rounded-lg bg-ink py-2.5 text-sm font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-60 cursor-pointer"
+              >
+                {loading ? "Enviando…" : "Enviar enlace"}
+              </button>
+            </form>
+          )}
+        </div>
+
+        <p className="mt-5 text-center text-sm text-ink-soft">
+          <Link to="/login" className="font-medium text-signal">
+            Volver al inicio de sesión
+          </Link>
+        </p>
+      </div>
+    </div>
+  );
+}
+
+
+=== frontend\src\pages\Friends.jsx ===
+import { useState } from "react";
+import { UserPlus, Check, X, Trash2, Trophy, Flame, CalendarCheck } from "lucide-react";
+import { useFriends } from "../hooks/useFriends";
+import { useAuth } from "../context/AuthContext";
+import ConfirmDialog from "../components/ConfirmDialog";
+
+function Medal({ rank }) {
+  if (rank === 0) return <span className="text-lg">🥇</span>;
+  if (rank === 1) return <span className="text-lg">🥈</span>;
+  if (rank === 2) return <span className="text-lg">🥉</span>;
+  return <span className="font-mono text-sm text-ink-faint">{rank + 1}</span>;
+}
+
+export default function Friends() {
+  const { user } = useAuth();
+  const {
+    leaderboard, loading, error,
+    pending, accepted, sent,
+    sendRequest, acceptRequest, rejectRequest, removeFriend,
+  } = useFriends();
+
+  const [emailInput, setEmailInput] = useState("");
+  const [sendError, setSendError] = useState("");
+  const [sendSuccess, setSendSuccess] = useState("");
+  const [sending, setSending] = useState(false);
+  const [confirmFriend, setConfirmFriend] = useState(null); // { id, name }
+
+  const handleSend = async (e) => {
+    e.preventDefault();
+    setSendError("");
+    setSendSuccess("");
+    if (!emailInput.trim()) return;
+    setSending(true);
+    try {
+      await sendRequest(emailInput.trim());
+      setSendSuccess("Solicitud enviada.");
+      setEmailInput("");
+    } catch (err) {
+      setSendError(err?.response?.data?.detail || "No se pudo enviar la solicitud.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (loading) return <p className="text-sm text-ink-soft">Cargando…</p>;
+  if (error) return <p className="rounded-lg bg-coral-soft px-4 py-3 text-sm text-coral">{error}</p>;
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div>
+        <h1 className="text-xl font-semibold">Amigos</h1>
+        <p className="text-sm text-ink-soft">Agrega amigos y compara su progreso.</p>
+      </div>
+
+      {/* Agregar amigo */}
+      <section className="rounded-2xl border border-line bg-panel p-5">
+        <h2 className="mb-3 text-sm font-semibold text-ink-soft">Agregar amigo</h2>
+        <form onSubmit={handleSend} className="flex gap-2">
+          <input
+            type="email"
+            placeholder="correo@ejemplo.com"
+            value={emailInput}
+            onChange={(e) => setEmailInput(e.target.value)}
+            className="flex-1 rounded-lg border border-line bg-bg px-3 py-2 text-sm outline-none focus:border-signal"
+          />
+          <button
+            type="submit"
+            disabled={sending}
+            className="flex items-center gap-1.5 rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-60 cursor-pointer"
+          >
+            <UserPlus size={15} />
+            {sending ? "Enviando…" : "Agregar"}
+          </button>
+        </form>
+        {sendError && <p className="mt-2 text-xs text-coral">{sendError}</p>}
+        {sendSuccess && <p className="mt-2 text-xs text-mint">{sendSuccess}</p>}
+      </section>
+
+      {/* Solicitudes pendientes recibidas */}
+      {pending.length > 0 && (
+        <section className="rounded-2xl border border-signal/30 bg-signal-soft p-5">
+          <h2 className="mb-3 text-sm font-semibold text-signal">
+            Solicitudes pendientes ({pending.length})
+          </h2>
+          <ul className="flex flex-col gap-2">
+            {pending.map((f) => (
+              <li key={f.id} className="flex items-center gap-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-violet-soft font-mono text-xs font-semibold text-violet">
+                  {f.friend.name.slice(0, 1).toUpperCase()}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{f.friend.name}</p>
+                  <p className="truncate text-xs text-ink-faint">{f.friend.email}</p>
+                </div>
+                <button
+                  onClick={() => acceptRequest(f.id)}
+                  title="Aceptar"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg bg-mint text-white transition-opacity hover:opacity-80 cursor-pointer"
+                >
+                  <Check size={15} />
+                </button>
+                <button
+                  onClick={() => rejectRequest(f.id)}
+                  title="Rechazar"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-line text-ink-faint transition-colors hover:bg-coral-soft hover:text-coral cursor-pointer"
+                >
+                  <X size={15} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* Solicitudes enviadas */}
+      {sent.length > 0 && (
+        <section className="rounded-2xl border border-line bg-panel p-5">
+          <h2 className="mb-3 text-sm font-semibold text-ink-soft">Solicitudes enviadas</h2>
+          <ul className="flex flex-col gap-2">
+            {sent.map((f) => (
+              <li key={f.id} className="flex items-center gap-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-violet-soft font-mono text-xs font-semibold text-violet">
+                  {f.friend.name.slice(0, 1).toUpperCase()}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{f.friend.name}</p>
+                  <p className="truncate text-xs text-ink-faint">{f.friend.email}</p>
+                </div>
+                <span className="rounded-full bg-panel-alt px-2.5 py-0.5 text-xs text-ink-faint">
+                  Pendiente
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* Leaderboard */}
+      <section className="rounded-2xl border border-line bg-panel p-5">
+        <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-ink-soft">
+          <Trophy size={15} className="text-signal" />
+          Leaderboard semanal
+        </h2>
+
+        {leaderboard.length <= 1 ? (
+          <p className="text-center text-sm text-ink-faint py-6">
+            Agrega amigos para ver el leaderboard.
+          </p>
+        ) : (
+          <ul className="flex flex-col divide-y divide-line">
+            {leaderboard.map((entry, i) => {
+              const isMe = entry.friend.email === user?.email;
+              return (
+                <li
+                  key={entry.friend.id}
+                  className={[
+                    "flex items-center gap-3 py-3",
+                    isMe ? "font-semibold" : "",
+                  ].join(" ")}
+                >
+                  <div className="flex w-7 items-center justify-center">
+                    <Medal rank={i} />
+                  </div>
+
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-violet-soft font-mono text-xs font-semibold text-violet">
+                    {entry.friend.name.slice(0, 1).toUpperCase()}
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm">
+                      {entry.friend.name}
+                      {isMe && <span className="ml-1.5 text-xs text-ink-faint font-normal">(tú)</span>}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-4 font-mono text-xs">
+                    <span className="flex items-center gap-1 text-coral" title="Racha actual">
+                      <Flame size={12} />
+                      {entry.current_streak}d
+                    </span>
+                    <span className="flex items-center gap-1 text-mint" title="Cumplimiento esta semana">
+                      <CalendarCheck size={12} />
+                      {entry.week_completion_rate}%
+                    </span>
+                  </div>
+
+                  {/* Botón eliminar amigo (solo para amigos aceptados, no para uno mismo) */}
+                  {!isMe && accepted.find((f) => f.friend.id === entry.friend.id) && (
+                    <button
+                      onClick={() => {
+                        const f = accepted.find((x) => x.friend.id === entry.friend.id);
+                        if (f) setConfirmFriend({ id: f.id, name: entry.friend.name });
+                      }}
+                      title="Eliminar amigo"
+                      className="flex h-7 w-7 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-coral-soft hover:text-coral cursor-pointer"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      <ConfirmDialog
+        open={!!confirmFriend}
+        title="Eliminar amigo"
+        message={`¿Seguro que quieres eliminar a ${confirmFriend?.name} de tus amigos?`}
+        confirmLabel="Eliminar"
+        onConfirm={() => { removeFriend(confirmFriend.id); setConfirmFriend(null); }}
+        onCancel={() => setConfirmFriend(null)}
+      />
     </div>
   );
 }
@@ -3432,6 +6220,180 @@ export default function Habits() {
 }
 
 
+=== frontend\src\pages\Journal.jsx ===
+import { useState, useEffect } from "react";
+import { ChevronDown, ChevronUp, Trash2, BookOpen } from "lucide-react";
+import { useJournal } from "../hooks/useJournal";
+import { todayLocalISODate } from "../lib/schedule";
+
+function formatDate(dateStr) {
+  const d = new Date(dateStr + "T12:00:00");
+  return d.toLocaleDateString("es", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+}
+
+// ── Editor de la entrada de hoy ────────────────────────────────────────────────
+function TodayEditor({ getEntry, saveEntry, deleteEntry, loading }) {
+  const today = todayLocalISODate();
+  const existing = getEntry(today);
+  const [text, setText] = useState("");
+  const [initialized, setInitialized] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
+
+  // Sincronizar cuando llega la entrada desde la BD (el fetch puede tardar)
+  useEffect(() => {
+    if (!loading && !initialized) {
+      setText(existing?.content || "");
+      setInitialized(true);
+    }
+  }, [loading, initialized, existing?.content]);
+
+  const handleSave = async () => {
+    if (!text.trim()) return;
+    // No guardar si el texto no cambió respecto a lo ya guardado
+    if (existing && text.trim() === existing.content) return;
+    setSaving(true);
+    setError("");
+    try {
+      await saveEntry(text.trim(), today);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (err) {
+      setError(err?.response?.data?.detail || "No se pudo guardar.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    await deleteEntry(today);
+    setText("");
+  };
+
+  return (
+    <div className="rounded-2xl border border-line bg-panel p-5 flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="font-semibold text-ink">Reflexión de hoy</h2>
+          <p className="text-xs text-ink-faint mt-0.5 capitalize">{formatDate(today)}</p>
+        </div>
+        {existing && (
+          <button
+            onClick={handleDelete}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-ink-faint hover:bg-coral-soft hover:text-coral transition-colors cursor-pointer"
+            title="Borrar entrada de hoy"
+          >
+            <Trash2 size={15} />
+          </button>
+        )}
+      </div>
+
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={handleSave}
+        placeholder="¿Cómo te fue hoy? ¿Qué sentiste? ¿Lograste tus hábitos? Escribe lo que quieras…"
+        rows={5}
+        maxLength={2000}
+        className="w-full resize-none rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-ink outline-none focus:border-signal placeholder:text-ink-faint"
+      />
+
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-ink-faint">{text.length}/2000</span>
+        <div className="flex items-center gap-2">
+          {saved && <span className="text-xs text-mint font-medium">¡Guardado!</span>}
+          {error && <span className="text-xs text-coral">{error}</span>}
+          <button
+            onClick={handleSave}
+            disabled={saving || !text.trim()}
+            className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-50 cursor-pointer"
+          >
+            {saving ? "Guardando…" : existing ? "Actualizar" : "Guardar"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Entrada pasada ─────────────────────────────────────────────────────────────
+function EntryCard({ entry, onDelete }) {
+  const [open, setOpen] = useState(false);
+  const today = todayLocalISODate();
+  if (entry.entry_date === today) return null;
+
+  return (
+    <div className="rounded-xl border border-line bg-panel overflow-hidden">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between px-4 py-3 text-left cursor-pointer hover:bg-panel-alt transition-colors"
+      >
+        <p className="text-sm font-medium text-ink capitalize">{formatDate(entry.entry_date)}</p>
+        <div className="flex items-center gap-2 shrink-0 ml-3">
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete(entry.entry_date); }}
+            className="flex h-6 w-6 items-center justify-center rounded text-ink-faint hover:bg-coral-soft hover:text-coral transition-colors cursor-pointer"
+          >
+            <Trash2 size={13} />
+          </button>
+          {open ? <ChevronUp size={15} className="text-ink-faint" /> : <ChevronDown size={15} className="text-ink-faint" />}
+        </div>
+      </button>
+
+      {open && (
+        <div className="border-t border-line px-4 py-3">
+          <p className="text-sm text-ink-soft leading-relaxed whitespace-pre-wrap">{entry.content}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Página principal ───────────────────────────────────────────────────────────
+export default function Journal() {
+  const { entries, loading, error, saveEntry, deleteEntry, getEntry } = useJournal();
+
+  const pastEntries = entries.filter((e) => e.entry_date !== todayLocalISODate());
+
+  return (
+    <div className="flex flex-col gap-6 max-w-2xl">
+      <div>
+        <h1 className="text-lg font-semibold">Diario</h1>
+        <p className="text-sm text-ink-soft mt-0.5">
+          Escribe tu reflexión del día. La IA la resume automáticamente.
+        </p>
+      </div>
+
+      <TodayEditor getEntry={getEntry} saveEntry={saveEntry} deleteEntry={deleteEntry} loading={loading} />
+
+      {loading ? (
+        <p className="text-sm text-ink-soft">Cargando…</p>
+      ) : error ? (
+        <p className="rounded-lg bg-coral-soft px-3 py-2 text-sm text-coral">{error}</p>
+      ) : pastEntries.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 py-10 text-center">
+          <BookOpen size={32} className="text-ink-faint" />
+          <p className="text-sm text-ink-soft">Aún no hay entradas anteriores.</p>
+          <p className="text-xs text-ink-faint">Escribe tu primera reflexión arriba.</p>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <h2 className="text-sm font-semibold text-ink-soft">Historial</h2>
+          {pastEntries.map((entry) => (
+            <EntryCard
+              key={entry.id}
+              entry={entry}
+              onDelete={deleteEntry}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 === frontend\src\pages\Login.jsx ===
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -3497,9 +6459,14 @@ export default function Login() {
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-ink-soft">
-              Contraseña
-            </label>
+            <div className="mb-1 flex items-center justify-between">
+              <label className="block text-xs font-medium text-ink-soft">
+                Contraseña
+              </label>
+              <Link to="/recuperar" className="text-xs text-ink-faint hover:text-signal transition-colors">
+                ¿Olvidaste tu contraseña?
+              </Link>
+            </div>
             <input
               type="password"
               required
@@ -3537,6 +6504,149 @@ export default function Login() {
 }
 
 
+=== frontend\src\pages\Profile.jsx ===
+import { useState, useEffect } from "react";
+import { Sparkles, User } from "lucide-react";
+import { useProfile } from "../hooks/useProfile";
+
+export default function Profile() {
+  const { bio, bioSummary, loading, error, saveBio, summarizeBio } = useProfile();
+  const [text, setText] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [summarizing, setSummarizing] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [summarizeError, setSummarizeError] = useState("");
+
+  // Sincronizar el textarea cuando carga el perfil
+  useEffect(() => {
+    if (!loading) setText(bio);
+  }, [loading, bio]);
+
+  const handleSave = async () => {
+    if (!text.trim()) return;
+    setSaving(true);
+    setSaveError("");
+    try {
+      await saveBio(text.trim());
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (err) {
+      setSaveError(err?.response?.data?.detail || "No se pudo guardar.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSummarize = async () => {
+    setSummarizing(true);
+    setSummarizeError("");
+    try {
+      await summarizeBio();
+    } catch (err) {
+      setSummarizeError(err?.response?.data?.detail || "No se pudo generar el resumen.");
+    } finally {
+      setSummarizing(false);
+    }
+  };
+
+  if (loading) return <p className="text-sm text-ink-soft">Cargando…</p>;
+
+  return (
+    <div className="flex flex-col gap-6 max-w-2xl">
+      <div>
+        <h1 className="text-lg font-semibold">Mi perfil</h1>
+        <p className="text-sm text-ink-soft mt-0.5">
+          Cuéntale a tu coach quién eres. Esto enriquece todas las conversaciones con la IA.
+        </p>
+      </div>
+
+      {/* Editor de bio */}
+      <div className="rounded-2xl border border-line bg-panel p-5 flex flex-col gap-3">
+        <div className="flex items-center gap-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-violet-soft text-violet">
+            <User size={15} />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-ink">Sobre mí</p>
+            <p className="text-xs text-ink-faint">Quién eres, tus objetivos, valores e intereses</p>
+          </div>
+        </div>
+
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={
+            "Escribe libremente sobre ti. Por ejemplo:\n\n" +
+            "Soy [nombre], quiero ser [objetivo]. Me apasiona [interés]. " +
+            "Mis valores son [valores]. Actualmente estoy trabajando en [proyecto/meta]…"
+          }
+          rows={8}
+          maxLength={5000}
+          className="w-full resize-none rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-ink outline-none focus:border-signal placeholder:text-ink-faint leading-relaxed"
+        />
+
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-ink-faint">{text.length}/5000</span>
+          <div className="flex items-center gap-2">
+            {saved && <span className="text-xs text-mint font-medium">¡Guardado!</span>}
+            {saveError && <span className="text-xs text-coral">{saveError}</span>}
+            <button
+              onClick={handleSave}
+              disabled={saving || !text.trim()}
+              className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-50 cursor-pointer"
+            >
+              {saving ? "Guardando…" : "Guardar"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Resumen IA */}
+      <div className="rounded-2xl border border-line bg-panel p-5 flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-violet-soft text-violet">
+              <Sparkles size={15} />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-ink">Perfil comprimido para la IA</p>
+              <p className="text-xs text-ink-faint">Lo que el coach usa como contexto de ti</p>
+            </div>
+          </div>
+          <button
+            onClick={handleSummarize}
+            disabled={summarizing || !bio.trim()}
+            className="rounded-lg bg-violet px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
+          >
+            <Sparkles size={12} />
+            {summarizing ? "Resumiendo…" : bioSummary ? "Regenerar" : "Generar"}
+          </button>
+        </div>
+
+        {summarizeError && (
+          <p className="rounded-lg bg-coral-soft px-3 py-2 text-sm text-coral">{summarizeError}</p>
+        )}
+
+        {bioSummary ? (
+          <div className="rounded-lg bg-violet-soft px-4 py-3">
+            <p className="text-sm text-ink-soft leading-relaxed">{bioSummary}</p>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-line px-4 py-6 text-center">
+            <p className="text-xs text-ink-faint">
+              Guarda tu bio y presiona "Generar" para que la IA extraiga lo esencial.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {error && <p className="rounded-lg bg-coral-soft px-3 py-2 text-sm text-coral">{error}</p>}
+    </div>
+  );
+}
+
+
 === frontend\src\pages\Register.jsx ===
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -3565,7 +6675,11 @@ export default function Register() {
       await register(name, email, password);
       navigate("/");
     } catch (err) {
-      setError(err?.response?.data?.detail || "No se pudo crear la cuenta.");
+      const detail = err?.response?.data?.detail;
+      const msg = typeof detail === "string"
+        ? detail
+        : "No se pudo crear la cuenta.";
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -3649,6 +6763,138 @@ export default function Register() {
             Inicia sesión
           </Link>
         </p>
+      </div>
+    </div>
+  );
+}
+
+
+=== frontend\src\pages\ResetPassword.jsx ===
+import { useState } from "react";
+import { Link, useSearchParams, useNavigate } from "react-router-dom";
+import { CheckCircle2 } from "lucide-react";
+import api from "../api/client";
+import ThemeToggle from "../components/ThemeToggle";
+
+export default function ResetPassword() {
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const token = searchParams.get("token") || "";
+
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    if (password.length < 6) {
+      setError("La contraseña debe tener al menos 6 caracteres.");
+      return;
+    }
+    if (password !== confirm) {
+      setError("Las contraseñas no coinciden.");
+      return;
+    }
+    setLoading(true);
+    try {
+      await api.post("/auth/reset-password", { token, new_password: password });
+      setDone(true);
+    } catch (err) {
+      setError(err?.response?.data?.detail || "El enlace no es válido o ya expiró.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!token) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-bg px-4">
+        <div className="text-center">
+          <p className="text-sm text-ink-soft mb-4">Enlace de recuperación inválido.</p>
+          <Link to="/recuperar" className="text-sm font-medium text-signal">
+            Solicitar uno nuevo
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-bg px-4 py-10">
+      <div className="absolute right-4 top-4">
+        <ThemeToggle />
+      </div>
+      <div className="w-full max-w-sm">
+        <div className="mb-8 flex flex-col items-center gap-2 text-center">
+          <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-signal text-panel">
+            <CheckCircle2 size={22} strokeWidth={2.5} />
+          </span>
+          <h1 className="font-mono text-xl font-semibold tracking-tight">rutina</h1>
+          <p className="text-sm text-ink-soft">Nueva contraseña</p>
+        </div>
+
+        <div className="rounded-2xl border border-line bg-panel p-6 shadow-[var(--shadow-card)]">
+          {done ? (
+            <div className="flex flex-col items-center gap-3 text-center py-2">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-signal/10">
+                <CheckCircle2 size={20} className="text-signal" />
+              </div>
+              <p className="text-sm font-medium text-ink">¡Contraseña actualizada!</p>
+              <p className="text-xs text-ink-soft">Ya puedes iniciar sesión con tu nueva contraseña.</p>
+              <button
+                onClick={() => navigate("/login")}
+                className="mt-2 w-full rounded-lg bg-ink py-2.5 text-sm font-semibold text-bg transition-opacity hover:opacity-90 cursor-pointer"
+              >
+                Ir al inicio de sesión
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-ink-soft">
+                  Nueva contraseña
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full rounded-lg border border-line bg-bg px-3 py-2.5 text-sm outline-none focus:border-signal"
+                  placeholder="Mínimo 6 caracteres"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-ink-soft">
+                  Confirmar contraseña
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={confirm}
+                  onChange={(e) => setConfirm(e.target.value)}
+                  className="w-full rounded-lg border border-line bg-bg px-3 py-2.5 text-sm outline-none focus:border-signal"
+                  placeholder="Repite la contraseña"
+                />
+              </div>
+
+              {error && (
+                <p className="rounded-lg bg-coral-soft px-3 py-2 text-sm text-coral">{error}</p>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="mt-1 rounded-lg bg-ink py-2.5 text-sm font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-60 cursor-pointer"
+              >
+                {loading ? "Guardando…" : "Guardar nueva contraseña"}
+              </button>
+            </form>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -3994,7 +7240,7 @@ App to build habits and take decision based on data
 fastapi>=0.115.6
 uvicorn[standard]>=0.34.0
 sqlalchemy>=2.0.36
-psycopg[binary]>=3.1.0
+psycopg[binary,pool]>=3.1.0
 python-jose[cryptography]>=3.3.0
 bcrypt>=4.0.1
 python-multipart>=0.0.20
@@ -4004,30 +7250,13 @@ python-dotenv>=1.0.1
 
 === vercel.json ===
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "api/index.py",
-      "use": "@vercel/python"
-    },
-    {
-      "src": "frontend/package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "dist"
-      }
-    }
-  ],
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "api/index.py"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "frontend/$1"
-    }
+  "buildCommand": "cd frontend && npm install && npm run build",
+  "outputDirectory": "frontend/dist",
+  "installCommand": "echo skip",
+  "framework": null,
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/index" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
-
 

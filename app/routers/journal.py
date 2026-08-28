@@ -378,7 +378,7 @@ def chat(
         db.query(models.JournalEntry)
         .filter(
             models.JournalEntry.user_id == current_user.id,
-            models.JournalEntry.entry_date >= today - timedelta(days=3),
+            models.JournalEntry.entry_date >= today - timedelta(days=7),
         )
         .order_by(models.JournalEntry.entry_date.asc())
         .all()
