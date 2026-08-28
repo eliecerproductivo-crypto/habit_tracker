@@ -21,7 +21,13 @@ export function useJournal() {
     }
   }, []);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    refresh();
+    // El backend genera resúmenes pendientes en background al abrir el diario.
+    // Refrescamos a los 5 s para que aparezcan sin que el usuario recargue la página.
+    const timer = setTimeout(() => refresh(), 5000);
+    return () => clearTimeout(timer);
+  }, [refresh]);
 
   const saveEntry = async (content, entryDate) => {
     const res = await api.put("/journal/entry", { content, entry_date: entryDate });

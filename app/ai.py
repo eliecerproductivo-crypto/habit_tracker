@@ -1,3 +1,4 @@
+#a
 """
 Servicio de IA: resúmenes de diario y chat con contexto personal.
 Usa Google Gemini API con fallback automático entre 2 keys y reintentos.

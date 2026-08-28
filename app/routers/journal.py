@@ -133,10 +133,63 @@ def _summarize_pending_bg(user_id: int, saved_date: date):
         db.close()
 
 
+def _summarize_all_pending_bg(user_id: int):
+    """
+    Se ejecuta en background al abrir el diario (GET /journal).
+    Resume todas las entradas pasadas que aún no tienen resumen.
+    Solo se llama a la IA si hay algo pendiente.
+    """
+    from app.ai import summarize_entries
+    from app.database import SessionLocal
+    from datetime import date as date_type
+
+    today = date_type.today()
+    db = SessionLocal()
+    try:
+        pending = (
+            db.query(models.JournalEntry)
+            .filter(
+                models.JournalEntry.user_id == user_id,
+                models.JournalEntry.entry_date < today,
+            )
+            .outerjoin(
+                models.JournalSummary,
+                (models.JournalSummary.user_id == user_id) &
+                (models.JournalSummary.date_from == models.JournalEntry.entry_date) &
+                (models.JournalSummary.date_to == models.JournalEntry.entry_date),
+            )
+            .filter(models.JournalSummary.id.is_(None))
+            .order_by(models.JournalEntry.entry_date.asc())
+            .all()
+        )
+
+        if not pending:
+            return  # Nada pendiente, sin llamadas a la IA
+
+        for entry in pending:
+            summary_text = summarize_entries(f"[{entry.entry_date}] {entry.content}")
+            if not summary_text:
+                logger.warning("AI summarization returned None for entry %d", entry.id)
+                continue
+            db.add(models.JournalSummary(
+                user_id=user_id,
+                summary=summary_text,
+                date_from=entry.entry_date,
+                date_to=entry.entry_date,
+            ))
+            db.commit()
+            logger.info("Summary saved for user %d, date %s", user_id, entry.entry_date)
+    except Exception as e:
+        logger.error("Background summarization (all pending) failed: %s", e)
+    finally:
+        db.close()
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @router.get("", response_model=JournalOverview)
 def get_journal(
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
@@ -152,6 +205,10 @@ def get_journal(
         .order_by(models.JournalSummary.date_to.desc())
         .all()
     )
+
+    # Resumir en background cualquier entrada pasada sin resumen
+    background_tasks.add_task(_summarize_all_pending_bg, current_user.id)
+
     return {"entries": entries, "summaries": summaries}
 
 
