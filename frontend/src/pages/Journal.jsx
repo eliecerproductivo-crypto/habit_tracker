@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Sparkles, ChevronDown, ChevronUp, Trash2, BookOpen } from "lucide-react";
+import { ChevronDown, ChevronUp, Trash2, BookOpen } from "lucide-react";
 import { useJournal } from "../hooks/useJournal";
 import { todayLocalISODate } from "../lib/schedule";
 
@@ -94,8 +94,8 @@ function TodayEditor({ getEntry, saveEntry, deleteEntry, loading }) {
   );
 }
 
-// ── Entrada pasada con su resumen ──────────────────────────────────────────────
-function EntryCard({ entry, summary, onDelete }) {
+// ── Entrada pasada ─────────────────────────────────────────────────────────────
+function EntryCard({ entry, onDelete }) {
   const [open, setOpen] = useState(false);
   const today = todayLocalISODate();
   if (entry.entry_date === today) return null;
@@ -106,18 +106,7 @@ function EntryCard({ entry, summary, onDelete }) {
         onClick={() => setOpen((o) => !o)}
         className="flex w-full items-center justify-between px-4 py-3 text-left cursor-pointer hover:bg-panel-alt transition-colors"
       >
-        <div>
-          <p className="text-sm font-medium text-ink capitalize">{formatDate(entry.entry_date)}</p>
-          {summary && (
-            <p className="text-xs text-ink-faint mt-0.5 line-clamp-1">{summary.summary}</p>
-          )}
-          {!summary && (
-            <p className="text-xs text-ink-faint mt-0.5 flex items-center gap-1">
-              <Sparkles size={10} />
-              Resumen pendiente…
-            </p>
-          )}
-        </div>
+        <p className="text-sm font-medium text-ink capitalize">{formatDate(entry.entry_date)}</p>
         <div className="flex items-center gap-2 shrink-0 ml-3">
           <button
             onClick={(e) => { e.stopPropagation(); onDelete(entry.entry_date); }}
@@ -130,17 +119,8 @@ function EntryCard({ entry, summary, onDelete }) {
       </button>
 
       {open && (
-        <div className="border-t border-line px-4 py-3 flex flex-col gap-3">
+        <div className="border-t border-line px-4 py-3">
           <p className="text-sm text-ink-soft leading-relaxed whitespace-pre-wrap">{entry.content}</p>
-          {summary && (
-            <div className="rounded-lg bg-violet-soft px-3 py-2.5">
-              <p className="text-[11px] font-semibold text-violet mb-1 flex items-center gap-1">
-                <Sparkles size={11} />
-                Resumen IA
-              </p>
-              <p className="text-xs text-ink-soft leading-relaxed">{summary.summary}</p>
-            </div>
-          )}
         </div>
       )}
     </div>
@@ -149,9 +129,8 @@ function EntryCard({ entry, summary, onDelete }) {
 
 // ── Página principal ───────────────────────────────────────────────────────────
 export default function Journal() {
-  const { entries, summaries, loading, error, saveEntry, deleteEntry, getEntry } = useJournal();
+  const { entries, loading, error, saveEntry, deleteEntry, getEntry } = useJournal();
 
-  const summaryByDate = Object.fromEntries(summaries.map((s) => [s.date_from, s]));
   const pastEntries = entries.filter((e) => e.entry_date !== todayLocalISODate());
 
   return (
@@ -182,7 +161,6 @@ export default function Journal() {
             <EntryCard
               key={entry.id}
               entry={entry}
-              summary={summaryByDate[entry.entry_date] || null}
               onDelete={deleteEntry}
             />
           ))}
