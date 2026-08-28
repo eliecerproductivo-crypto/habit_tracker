@@ -9,8 +9,14 @@ import { todayLocalISODate, toLocalISODate, habitOccursOnDate } from "../lib/sch
 
 export default function Dashboard() {
   const [selectedDate, setSelectedDate] = useState(todayLocalISODate());
-  const { habits: allHabits, completedHabitIds, logsByHabitId, loading, error, setHabitStatus } = useHabits(selectedDate);
-  const { summary } = useStats();
+  const { habits: allHabits, completedHabitIds, logsByHabitId, loading, error, setHabitStatus, refresh: refreshHabits } = useHabits(selectedDate);
+  const { summary, refresh: refreshStats } = useStats();
+
+  // Wrapper que actualiza el estado del hábito y luego refresca las stats
+  const handleSetStatus = async (habitId, status) => {
+    await setHabitStatus(habitId, status);
+    refreshStats();
+  };
 
   // Excluir hábitos que no existían en la fecha seleccionada.
   // created_at viene del backend en UTC (sin sufijo de zona), así que hay que
@@ -53,7 +59,7 @@ export default function Dashboard() {
           <CurrentFocusCard
             habits={habits}
             logsByHabitId={logsByHabitId}
-            onSetStatus={setHabitStatus}
+            onSetStatus={handleSetStatus}
             date={selectedDate}
           />
 
@@ -85,7 +91,7 @@ export default function Dashboard() {
             <TodayChecklist
               habits={habits}
               logsByHabitId={logsByHabitId}
-              onSetStatus={setHabitStatus}
+              onSetStatus={handleSetStatus}
               date={selectedDate}
             />
           </div>
