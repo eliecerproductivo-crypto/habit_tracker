@@ -129,15 +129,14 @@ def summarize_entries(entries_text: str) -> Optional[str]:
         {
             "role": "system",
             "content": (
-                "Eres un asistente personal que resume entradas de diario sobre hábitos y rutinas. "
-                "Haz un resumen conciso (máximo 150 palabras) en español que capture: "
-                "estado emocional, logros, dificultades y patrones relevantes. "
-                "Escribe en tercera persona de forma neutra, útil para dar contexto a una IA."
+                "Resume esta entrada de diario en español lo más breve posible. "
+                "Incluye solo: estado emocional, qué hizo o no hizo, y algún patrón notable. "
+                "Elimina todo relleno. Cuantas menos palabras necesites para transmitir lo esencial, mejor."
             ),
         },
         {"role": "user", "content": entries_text},
     ]
-    return _call_with_fallback(messages, max_tokens=300)
+    return _call_with_fallback(messages, max_tokens=120)
 
 
 def chat_with_context(
