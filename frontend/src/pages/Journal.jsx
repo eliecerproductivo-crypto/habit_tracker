@@ -28,6 +28,8 @@ function TodayEditor({ getEntry, saveEntry, deleteEntry, loading }) {
 
   const handleSave = async () => {
     if (!text.trim()) return;
+    // No guardar si el texto no cambió respecto a lo ya guardado
+    if (existing && text.trim() === existing.content) return;
     setSaving(true);
     setError("");
     try {
@@ -67,6 +69,7 @@ function TodayEditor({ getEntry, saveEntry, deleteEntry, loading }) {
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
+        onBlur={handleSave}
         placeholder="¿Cómo te fue hoy? ¿Qué sentiste? ¿Lograste tus hábitos? Escribe lo que quieras…"
         rows={5}
         maxLength={2000}
