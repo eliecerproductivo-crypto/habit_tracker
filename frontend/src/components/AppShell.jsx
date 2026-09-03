@@ -146,7 +146,12 @@ export default function AppShell({ children }) {
             </div>
           </header>
 
-          <main className="flex-1 px-5 pb-24 pt-4 md:px-8 md:pb-10 md:pt-6">
+          <main className={[
+            "flex-1",
+            location.pathname === "/coach"
+              ? "flex flex-col overflow-hidden"
+              : "px-5 pb-24 pt-4 md:px-8 md:pb-10 md:pt-6",
+          ].join(" ")}>
             {children}
           </main>
 
