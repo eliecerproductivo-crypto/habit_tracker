@@ -296,6 +296,8 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=1000)
     history: list[ChatMessage] = []  # historial de la sesión actual
+    include_diary: bool = True       # si se incluye contexto del diario o no
+    selected_entry_ids: list[int] | None = None  # IDs específicos de notas a enviar como contexto
 
 
 class ChatResponse(BaseModel):
@@ -373,33 +375,56 @@ def chat(
             f"  • {h.name} [{h.category}]{desc_str} — {time_str} — {freq_str}"
         )
 
-    # ── 4. Notas recientes en texto completo (hoy y últimos 3 días) ───────────
-    recent_entries = (
-        db.query(models.JournalEntry)
-        .filter(
-            models.JournalEntry.user_id == current_user.id,
-            models.JournalEntry.entry_date >= today - timedelta(days=7),
-        )
-        .order_by(models.JournalEntry.entry_date.asc())
-        .all()
-    )
-    recent_notes_lines = [
-        f"  [{e.entry_date}] {e.content}"
-        for e in recent_entries
-    ]
+    # ── 4. Notas seleccionadas del diario ───────────────────────────────────────
+    recent_notes_lines = []
+    diary_context = []
 
-    # ── 5. Resúmenes del diario (últimos 7, para contexto histórico) ──────────
-    recent_summaries = (
-        db.query(models.JournalSummary)
-        .filter(models.JournalSummary.user_id == current_user.id)
-        .order_by(models.JournalSummary.date_to.desc())
-        .limit(7)
-        .all()
-    )
-    diary_context = [
-        f"[{s.date_from}] {s.summary}"
-        for s in reversed(recent_summaries)
-    ]
+    if payload.include_diary:
+        if payload.selected_entry_ids is not None:
+            # El usuario eligió notas específicas
+            if payload.selected_entry_ids:
+                selected_entries = (
+                    db.query(models.JournalEntry)
+                    .filter(
+                        models.JournalEntry.user_id == current_user.id,
+                        models.JournalEntry.id.in_(payload.selected_entry_ids),
+                    )
+                    .order_by(models.JournalEntry.entry_date.asc())
+                    .all()
+                )
+                recent_notes_lines = [
+                    f"  [{e.entry_date}] {e.content}"
+                    for e in selected_entries
+                ]
+            # Si envió lista vacía, significa que no seleccionó ninguna nota
+        else:
+            # Comportamiento por defecto si no especifica lista de IDs: notas de los últimos 7 días
+            recent_entries = (
+                db.query(models.JournalEntry)
+                .filter(
+                    models.JournalEntry.user_id == current_user.id,
+                    models.JournalEntry.entry_date >= today - timedelta(days=7),
+                )
+                .order_by(models.JournalEntry.entry_date.asc())
+                .all()
+            )
+            recent_notes_lines = [
+                f"  [{e.entry_date}] {e.content}"
+                for e in recent_entries
+            ]
+
+            # ── 5. Resúmenes del diario (solo si no se especificaron notas puntuales)
+            recent_summaries = (
+                db.query(models.JournalSummary)
+                .filter(models.JournalSummary.user_id == current_user.id)
+                .order_by(models.JournalSummary.date_to.desc())
+                .limit(5)
+                .all()
+            )
+            diary_context = [
+                f"[{s.date_from}] {s.summary}"
+                for s in reversed(recent_summaries)
+            ]
 
     # ── 6. Estadísticas ───────────────────────────────────────────────────────
     from app.routers.stats import compute_user_stats
