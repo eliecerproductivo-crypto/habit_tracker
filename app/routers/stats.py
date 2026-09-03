@@ -128,10 +128,10 @@ def compute_user_stats(db: Session, user: models.User) -> schemas.StatsSummary:
     today = date_type.today()
 
     current_streak = 0
-    # Si hoy ya tiene al menos un log, lo incluimos en la racha.
-    # Si aún no hay logs hoy (el día no ha terminado), empezamos desde ayer.
-    today_has_logs = bool(status_by_date.get(today))
-    cursor = today if today_has_logs else today - timedelta(days=1)
+    # Hoy nunca se incluye en la racha: el día aún no ha terminado y los hábitos
+    # pueden completarse hasta la medianoche. La racha siempre se calcula desde
+    # ayer hacia atrás para evitar que la racha caiga a 0 durante el día.
+    cursor = today - timedelta(days=1)
     for _ in range(MAX_LOOKBACK_DAYS):
         status = _day_status(cursor, habits_by_weekday, non_weekly, status_by_date)
         if status is None:
@@ -146,7 +146,8 @@ def compute_user_stats(db: Session, user: models.User) -> schemas.StatsSummary:
     best_streak = 0
     running = 0
     cursor = today - timedelta(days=MAX_LOOKBACK_DAYS)
-    while cursor <= today:
+    # No incluir hoy (el día no ha terminado)
+    while cursor <= today - timedelta(days=1):
         status = _day_status(cursor, habits_by_weekday, non_weekly, status_by_date)
         if status is True:
             running += 1
