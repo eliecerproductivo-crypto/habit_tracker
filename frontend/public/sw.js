@@ -1,18 +1,10 @@
-// Service Worker de Rutina
-// Combina:
-//   1. Precaché de assets estáticos (inyectado por vite-plugin-pwa en build)
-//   2. Notificaciones push (lógica original)
+// Este archivo es el SW de desarrollo/fallback para notificaciones push.
+// En producción, vite-plugin-pwa (Workbox) lo reemplaza con el SW generado
+// que incluye precaché de assets, NetworkFirst para /api, y este código.
 
-import { precacheAndRoute, cleanupOutdatedCaches } from 'workbox-precaching';
+self.addEventListener("push", () => {});
 
-// Precaché de todos los assets del build (Vite inyecta __WB_MANIFEST)
-precacheAndRoute(self.__WB_MANIFEST || []);
-cleanupOutdatedCaches();
-
-// ── Notificaciones push (funcionalidad original) ──────────────────────────────
-self.addEventListener('push', () => {});
-
-self.addEventListener('notificationclick', (e) => {
+self.addEventListener("notificationclick", (e) => {
   e.notification.close();
-  e.waitUntil(clients.openWindow('/'));
+  e.waitUntil(clients.openWindow("/"));
 });
