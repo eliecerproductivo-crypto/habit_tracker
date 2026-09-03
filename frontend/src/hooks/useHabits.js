@@ -49,25 +49,25 @@ export function useHabits(date) {
 
       syncOfflineQueue().catch(() => {});
     } catch (err) {
-      const isOffline =
-        !navigator.onLine ||
-        err.code === "ERR_NETWORK" ||
-        err.code === "ECONNABORTED" ||
-        !err.response;
+      // Cualquier fallo sin respuesta del servidor = tratar como offline.
+      // No importa el código exacto: si no hay response, no hay red.
+      const noResponse = !err.response;
 
-      if (isOffline) {
-        // 1. sessionStorage (misma sesión, más rápido)
-        const ssHabits = ssGet("habits_cache");
-        const ssLogs   = ssGet(`logs_cache_${targetDate}`);
-        // 2. IndexedDB (sesiones anteriores)
-        const idbHabits = await get("cached_habits").catch(() => null);
-        const idbLogs   = await get(`cached_logs_${targetDate}`).catch(() => null);
+      if (noResponse) {
+        // Leer caché — sessionStorage primero (misma sesión), luego IndexedDB
+        const ssHabits  = ssGet("habits_cache");
+        const ssLogs    = ssGet(`logs_cache_${targetDate}`);
+        const idbHabits = ssHabits  ? null : await get("cached_habits").catch(() => null);
+        const idbLogs   = ssLogs    ? null : await get(`cached_logs_${targetDate}`).catch(() => null);
 
-        const finalHabits = ssHabits || idbHabits || [];
-        const finalLogs   = ssLogs   || idbLogs   || [];
+        const finalHabits = ssHabits  || idbHabits  || [];
+        const finalLogs   = ssLogs    || idbLogs    || [];
 
-        setHabits(finalHabits);
-        setLogs(finalLogs);
+        // Solo actualizar el estado si la caché tiene datos.
+        // Si no hay caché, conservar lo que ya está en pantalla (del useState inicial).
+        if (finalHabits.length > 0) setHabits(finalHabits);
+        if (finalLogs.length > 0)   setLogs(finalLogs);
+
         setError("Sin conexión — mostrando datos guardados localmente.");
       } else {
         setError(err?.response?.data?.detail || "No se pudo cargar la información.");

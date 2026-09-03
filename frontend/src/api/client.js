@@ -4,7 +4,7 @@ import axios from "axios";
 // In production on Vercel, /api resolves to the serverless functions in /api.
 const api = axios.create({
   baseURL: "/api",
-  timeout: 30000, // 30s para tolerar cold starts de Vercel
+  timeout: 8000, // 8s — suficiente para Vercel cold starts, rápido para detectar offline
 });
 
 const TOKEN_KEY = "habit_tracker_token";
