@@ -12,7 +12,9 @@ import {
   Legend,
 } from "recharts";
 import { useStats } from "../hooks/useStats";
+import { useWildcard } from "../hooks/useWildcard";
 import StatCard from "../components/StatCard";
+import WildcardWidget from "../components/WildcardWidget";
 import { categoryMeta } from "../lib/categories";
 
 function tokenToHex(token, isDark) {
@@ -39,6 +41,7 @@ function tokenToHex(token, isDark) {
 
 export default function Stats() {
   const { summary, weekly, byCategory, loading, error } = useStats();
+  const { wildcard, gained, checkMilestone, useWildcardForDate } = useWildcard();
   const isDark = document.documentElement.classList.contains("dark");
 
   const gridColor = isDark ? "#232E47" : "#E3E7F0";
@@ -73,6 +76,13 @@ export default function Stats() {
         <StatCard label="Semana" value={`${summary.week_completion_rate}%`} sublabel="cumplimiento" accent="violet" />
         <StatCard label="Total completados" value={summary.total_completed} sublabel="hábitos" accent="sky" />
       </div>
+
+      <WildcardWidget
+        wildcard={wildcard}
+        currentStreak={summary.current_streak}
+        gained={gained}
+        onUse={useWildcardForDate}
+      />
 
       <div className="rounded-2xl border border-line bg-panel p-4 md:p-6">
         <h2 className="mb-4 text-sm font-semibold text-ink-soft">

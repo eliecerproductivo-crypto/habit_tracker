@@ -52,6 +52,10 @@ def upsert_log(
 
     if log:
         log.status = payload.status
+        if payload.mood is not None:
+            log.mood = payload.mood
+        if payload.note is not None:
+            log.note = payload.note
         log.logged_at = datetime.now(timezone.utc)
     else:
         log = models.HabitLog(
@@ -59,6 +63,8 @@ def upsert_log(
             user_id=current_user.id,
             date=payload.date,
             status=payload.status,
+            mood=payload.mood,
+            note=payload.note or "",
         )
         db.add(log)
 

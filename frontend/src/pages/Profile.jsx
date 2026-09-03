@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
-import { Sparkles, User } from "lucide-react";
+import { Sparkles, User, Download } from "lucide-react";
 import { useProfile } from "../hooks/useProfile";
+import api from "../api/client";
 
 export default function Profile() {
   const { bio, bioSummary, loading, error, saveBio, summarizeBio } = useProfile();
@@ -10,6 +11,8 @@ export default function Profile() {
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [summarizeError, setSummarizeError] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
 
   // Sincronizar el textarea cuando carga el perfil
   useEffect(() => {
@@ -40,6 +43,25 @@ export default function Profile() {
       setSummarizeError(err?.response?.data?.detail || "No se pudo generar el resumen.");
     } finally {
       setSummarizing(false);
+    }
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    setExportError("");
+    try {
+      const res = await api.get("/profile/export", { responseType: "blob" });
+      const today = new Date().toISOString().slice(0, 10);
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `rutina_export_${today}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setExportError("No se pudo generar la exportación. Intenta de nuevo.");
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -135,6 +157,42 @@ export default function Profile() {
       </div>
 
       {error && <p className="rounded-lg bg-coral-soft px-3 py-2 text-sm text-coral">{error}</p>}
+
+      {/* Exportar datos */}
+      <div className="rounded-2xl border border-line bg-panel p-5 flex flex-col gap-3">
+        <div className="flex items-center gap-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-mint-soft text-mint">
+            <Download size={15} />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-ink">Exportar todos mis datos</p>
+            <p className="text-xs text-ink-faint">
+              Descarga tus hábitos, historial, diario, sesiones y perfil en un ZIP con CSVs listos para Excel.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-md bg-bg border border-line px-2 py-0.5 text-xs text-ink-faint">habitos.csv</span>
+          <span className="rounded-md bg-bg border border-line px-2 py-0.5 text-xs text-ink-faint">historial_habitos.csv</span>
+          <span className="rounded-md bg-bg border border-line px-2 py-0.5 text-xs text-ink-faint">sesiones_temporizador.csv</span>
+          <span className="rounded-md bg-bg border border-line px-2 py-0.5 text-xs text-ink-faint">diario.csv</span>
+          <span className="rounded-md bg-bg border border-line px-2 py-0.5 text-xs text-ink-faint">perfil.csv</span>
+        </div>
+
+        {exportError && (
+          <p className="rounded-lg bg-coral-soft px-3 py-2 text-sm text-coral">{exportError}</p>
+        )}
+
+        <button
+          onClick={handleExport}
+          disabled={exporting}
+          className="flex w-fit items-center gap-2 rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-50 cursor-pointer"
+        >
+          <Download size={14} />
+          {exporting ? "Preparando descarga…" : "Descargar todos mis datos (.ZIP)"}
+        </button>
+      </div>
     </div>
   );
 }

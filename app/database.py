@@ -83,6 +83,16 @@ def _migrate(connection):
                     "ALTER TABLE habit_logs DROP COLUMN IF EXISTS completed"
                 ))
 
+        if "mood" not in columns:
+            connection.execute(text(
+                "ALTER TABLE habit_logs ADD COLUMN mood VARCHAR(20) DEFAULT NULL"
+            ))
+
+        if "note" not in columns:
+            connection.execute(text(
+                "ALTER TABLE habit_logs ADD COLUMN note VARCHAR(500) DEFAULT ''"
+            ))
+
     # ── habits: start_time / end_time → nullable ───────────────────────────
     if "habits" in tables:
         dialect = connection.dialect.name
@@ -128,6 +138,25 @@ def _migrate(connection):
                 "THEN ALTER TABLE categories ADD CONSTRAINT uq_category_user_name UNIQUE (user_id, name); "
                 "END IF; END $$;"
             ))
+
+    # ── wildcard_balance: tabla de comodines ──────────────────────────────
+    # create_all la crea si no existe; este bloque solo añade columnas faltantes
+    # si la tabla fue creada por una versión anterior sin ellas.
+    if "wildcard_balance" in inspector.get_table_names():
+        wc_cols = {c["name"] for c in inspector.get_columns("wildcard_balance")}
+        if "last_milestone" not in wc_cols:
+            connection.execute(text(
+                "ALTER TABLE wildcard_balance ADD COLUMN last_milestone INTEGER NOT NULL DEFAULT 0"
+            ))
+        if "last_used_date" not in wc_cols:
+            connection.execute(text(
+                "ALTER TABLE wildcard_balance ADD COLUMN last_used_date DATE DEFAULT NULL"
+            ))
+        if "updated_at" not in wc_cols:
+            connection.execute(text(
+                "ALTER TABLE wildcard_balance ADD COLUMN updated_at TIMESTAMP DEFAULT NULL"
+            ))
+
 
 def init_db():
     # Creates tables if they don't exist yet, then applies pending migrations.

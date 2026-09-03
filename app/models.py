@@ -88,6 +88,8 @@ class HabitLog(Base):
     date = Column(Date, nullable=False, default=date.today, index=True)
     # "done" = lo hice | "skipped" = no pude (omitido) | "failed" = no quise (fallido)
     status = Column(String(10), nullable=False, default="done")
+    mood = Column(String(20), nullable=True, default=None)  # "great", "good", "neutral", "tired", "hard"
+    note = Column(String(500), nullable=True, default="")
     logged_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     habit = relationship("Habit", back_populates="logs")
@@ -157,6 +159,34 @@ class UserProfile(Base):
     # Versión comprimida generada por IA — solo lo útil para contexto
     bio_summary = Column(String(1000), nullable=True, default=None)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc))
+
+    owner = relationship("User", foreign_keys=[user_id])
+
+
+class WildcardBalance(Base):
+    """
+    Saldo de comodines del usuario.
+    Un comodín protege la racha cuando el usuario no puede completar todos
+    sus hábitos un día determinado.
+
+    Reglas de negocio:
+      - Se gana 1 comodín cada 15 días de racha (hitos: 15, 30, 45, …).
+      - Tope máximo de 2 comodines en cualquier momento.
+      - No se pueden usar dos comodines en días consecutivos.
+      - last_milestone: el último múltiplo de 15 por el que ya se otorgó comodín,
+        para no otorgar el mismo hito dos veces.
+      - last_used_date: fecha en la que se usó el último comodín (control anti-consecutivo).
+    """
+    __tablename__ = "wildcard_balance"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False, index=True)
+    balance = Column(Integer, nullable=False, default=0)          # 0–2
+    last_milestone = Column(Integer, nullable=False, default=0)   # último múltiplo de 15 otorgado
+    last_used_date = Column(Date, nullable=True, default=None)     # para regla anti-consecutivo
+    updated_at = Column(DateTime(timezone=True),
+                        default=lambda: datetime.now(timezone.utc),
                         onupdate=lambda: datetime.now(timezone.utc))
 
     owner = relationship("User", foreign_keys=[user_id])

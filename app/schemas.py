@@ -91,6 +91,8 @@ class LogCreate(BaseModel):
     habit_id: int
     date: date
     status: str = "done"
+    mood: Optional[str] = Field(default=None, max_length=20)
+    note: Optional[str] = Field(default="", max_length=500)
 
     @field_validator("status")
     @classmethod
@@ -105,6 +107,8 @@ class LogOut(BaseModel):
     habit_id: int
     date: date
     status: str
+    mood: Optional[str] = None
+    note: Optional[str] = ""
     logged_at: datetime
 
     class Config:
@@ -222,3 +226,19 @@ class TimerStatsOut(BaseModel):
     today_sessions_count: int
     habits_breakdown: list[HabitTimeStat]
 
+
+
+# ---------- Wildcards (comodines) ----------
+
+class WildcardStatus(BaseModel):
+    balance: int                          # 0, 1 o 2
+    last_milestone: int                   # último múltiplo de 15 ya otorgado
+    last_used_date: Optional[date] = None # cuándo se usó el último comodín
+    max_balance: int = 2                  # tope inmutable (informativo para UI)
+    next_milestone: int                   # próxima racha en la que se ganará uno
+    can_use_today: bool                   # False si se usó uno ayer (anti-consecutivo)
+    at_cap: bool                          # True si balance == 2
+
+
+class WildcardUseRequest(BaseModel):
+    date: date                            # fecha para la que se activa el comodín

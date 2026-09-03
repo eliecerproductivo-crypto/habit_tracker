@@ -2,20 +2,26 @@ import { useState } from "react";
 import CurrentFocusCard from "../components/CurrentFocusCard";
 import TodayChecklist from "../components/TodayChecklist";
 import StatCard from "../components/StatCard";
+import WildcardWidget from "../components/WildcardWidget";
 import DateNavBar from "../components/DateNavBar";
 import { useHabits } from "../hooks/useHabits";
 import { useStats } from "../hooks/useStats";
+import { useWildcard } from "../hooks/useWildcard";
 import { todayLocalISODate, toLocalISODate, habitOccursOnDate } from "../lib/schedule";
 
 export default function Dashboard() {
   const [selectedDate, setSelectedDate] = useState(todayLocalISODate());
   const { habits: allHabits, completedHabitIds, logsByHabitId, loading, error, setHabitStatus, refresh: refreshHabits } = useHabits(selectedDate);
   const { summary, refresh: refreshStats } = useStats();
+  const { wildcard, gained, checkMilestone, useWildcardForDate, refresh: refreshWildcard } = useWildcard();
 
   // Wrapper que actualiza el estado del hábito y luego refresca las stats
-  const handleSetStatus = async (habitId, status) => {
-    await setHabitStatus(habitId, status);
+  const handleSetStatus = async (habitId, status, extra = {}) => {
+    const res = await setHabitStatus(habitId, status, extra);
     refreshStats();
+    // Verifica si se alcanzó un nuevo hito de 15 días al marcar un hábito como hecho
+    if (status === "done") checkMilestone();
+    return res;
   };
 
   // Excluir hábitos que no existían en la fecha seleccionada.
@@ -83,6 +89,20 @@ export default function Dashboard() {
               accent="violet"
             />
           </div>
+
+          {/* Comodines — solo visibles en vista de hoy */}
+          {isToday && (
+            <WildcardWidget
+              wildcard={wildcard}
+              currentStreak={summary ? summary.current_streak : 0}
+              gained={gained}
+              onUse={async (date) => {
+                await useWildcardForDate(date);
+                refreshHabits();
+                refreshStats();
+              }}
+            />
+          )}
 
           <div>
             <h2 className="mb-3 text-sm font-semibold text-ink-soft">

@@ -298,6 +298,7 @@ class ChatRequest(BaseModel):
     history: list[ChatMessage] = []  # historial de la sesión actual
     include_diary: bool = True       # si se incluye contexto del diario o no
     selected_entry_ids: list[int] | None = None  # IDs específicos de notas a enviar como contexto
+    include_habit_notes: bool = True # si se incluyen sensaciones y notas de hábitos
 
 
 class ChatResponse(BaseModel):
@@ -426,6 +427,35 @@ def chat(
                 for s in reversed(recent_summaries)
             ]
 
+    # ── 5.5 Notas y sensaciones de hábitos ────────────────────────────────────
+    habit_notes_lines = []
+    if payload.include_habit_notes:
+        recent_habit_logs = (
+            db.query(models.HabitLog)
+            .join(models.Habit, models.Habit.id == models.HabitLog.habit_id)
+            .filter(
+                models.HabitLog.user_id == current_user.id,
+                models.HabitLog.date >= today - timedelta(days=7),
+                (models.HabitLog.note != "") | (models.HabitLog.mood.isnot(None)),
+            )
+            .order_by(models.HabitLog.date.desc())
+            .limit(15)
+            .all()
+        )
+        MOOD_MAP = {
+            "great": "🤩 Genial",
+            "good": "😊 Bien",
+            "neutral": "😐 Normal",
+            "tired": "🥱 Cansado",
+            "hard": "😫 Difícil",
+        }
+        for log in recent_habit_logs:
+            mood_str = f" [Ánimo: {MOOD_MAP.get(log.mood, log.mood)}]" if log.mood else ""
+            note_str = f': "{log.note}"' if log.note else ""
+            habit_name = log.habit.name if log.habit else f"Hábito #{log.habit_id}"
+            status_es = "Completado" if log.status == "done" else ("Omitido" if log.status == "skipped" else "Fallido")
+            habit_notes_lines.append(f"  • [{log.date}] {habit_name} ({status_es}){mood_str}{note_str}")
+
     # ── 6. Estadísticas ───────────────────────────────────────────────────────
     from app.routers.stats import compute_user_stats
     user_stats = compute_user_stats(db, current_user)
@@ -442,6 +472,7 @@ def chat(
         context_summaries=diary_context,
         habits_text="\n".join(habits_lines) if habits_lines else "Sin hábitos registrados.",
         recent_notes=recent_notes_lines,
+        habit_notes=habit_notes_lines,
         stats={
             "dias_en_app": days_in_app,
             "racha_actual": user_stats.current_streak,

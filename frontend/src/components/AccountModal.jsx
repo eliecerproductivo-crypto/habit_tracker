@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Trash2, LogOut } from "lucide-react";
+import { Trash2, LogOut, Download } from "lucide-react";
 import Modal from "./Modal";
 import ConfirmDialog from "./ConfirmDialog";
 import { useAuth } from "../context/AuthContext";
+import api from "../api/client";
 
 export default function AccountModal({ open, onClose }) {
   const { user, logout, updateProfile, changePassword, deleteAccount } = useAuth();
@@ -21,6 +22,27 @@ export default function AccountModal({ open, onClose }) {
   const [savingPassword, setSavingPassword] = useState(false);
 
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
+
+  const handleExport = async () => {
+    setExporting(true);
+    setExportError("");
+    try {
+      const res = await api.get("/profile/export", { responseType: "blob" });
+      const today = new Date().toISOString().slice(0, 10);
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `rutina_export_${today}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setExportError("No se pudo generar la exportación. Intenta de nuevo.");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const inputClass =
     "w-full rounded-lg border border-line bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-signal";
@@ -212,6 +234,32 @@ export default function AccountModal({ open, onClose }) {
               {savingPassword ? "Guardando…" : "Actualizar contraseña"}
             </button>
           </form>
+
+          <div className="border-t border-line" />
+
+          {/* Tus datos */}
+          <div className="flex flex-col gap-2">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
+              Tus datos
+            </h4>
+            <p className="text-xs text-ink-faint">
+              Descarga todos tus hábitos, historial, sesiones, diario y perfil en un ZIP con archivos CSV listos para Excel o Google Sheets.
+            </p>
+            {exportError && (
+              <p className="rounded-lg bg-coral-soft px-3 py-2 text-sm text-coral">
+                {exportError}
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={handleExport}
+              disabled={exporting}
+              className="flex w-fit items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-xs font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-50 cursor-pointer"
+            >
+              <Download size={13} />
+              {exporting ? "Preparando descarga…" : "Descargar todos mis datos (.ZIP)"}
+            </button>
+          </div>
 
           <div className="border-t border-line" />
 

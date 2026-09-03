@@ -147,10 +147,11 @@ def chat_with_context(
     stats: dict | None = None,
     bio_summary: str | None = None,
     recent_notes: list[str] | None = None,
+    habit_notes: list[str] | None = None,
 ) -> Optional[str]:
     """
     Responde al usuario usando perfil personal, hábitos, estadísticas,
-    notas recientes y resúmenes del diario como contexto.
+    notas recientes, notas de hábitos y resúmenes del diario como contexto.
     """
     # ── Perfil ────────────────────────────────────────────────────────────────
     bio_block = f"\n\nQUIÉN SOY (perfil del usuario):\n{bio_summary}" if bio_summary else ""
@@ -176,11 +177,17 @@ def chat_with_context(
             f"{nota_line}"
         )
 
-    # ── Notas recientes en texto completo (últimos 3 días) ────────────────────
+    # ── Notas recientes del diario general en texto completo ──────────────────
     notes_block = ""
     if recent_notes:
         notes_text = "\n".join(recent_notes)
-        notes_block = f"\n\nNOTAS RECIENTES DEL DIARIO (texto completo, últimos 3 días):\n{notes_text}"
+        notes_block = f"\n\nNOTAS RECIENTES DEL DIARIO GENERAL:\n{notes_text}"
+
+    # ── Notas y estado de ánimo específicos de cada hábito ────────────────────
+    habit_notes_block = ""
+    if habit_notes:
+        habit_notes_text = "\n".join(habit_notes)
+        habit_notes_block = f"\n\nSENSACIONES Y NOTAS AL REGISTRAR HÁBITOS (últimos días):\n{habit_notes_text}"
 
     # ── Resúmenes históricos del diario ───────────────────────────────────────
     diary_block = (
@@ -192,7 +199,7 @@ def chat_with_context(
     system_prompt = (
         "Eres un coach personal de hábitos y productividad. "
         "Tu objetivo es ayudar al usuario a entender sus patrones, mejorar su rutina y superar bloqueos. "
-        "Usa el contexto completo (perfil, hábitos, estadísticas, notas recientes y diario) "
+        "Usa el contexto completo (perfil, hábitos, estadísticas, notas recientes, sensaciones de hábitos y diario) "
         "para dar respuestas personalizadas y concretas. "
         "Responde siempre en español, de forma empática pero directa. "
         "Sé conciso: cada palabra debe aportar valor. Elimina relleno, repeticiones y frases obvias. "
@@ -208,6 +215,7 @@ def chat_with_context(
         "es demasiado pronto para evaluar tendencias.\n\n"
         f"RESÚMENES DEL DIARIO (contexto histórico):\n{diary_block}"
         f"{notes_block}"
+        f"{habit_notes_block}"
         f"{bio_block}"
         f"{habits_block}"
         f"{stats_block}"

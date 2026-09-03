@@ -7,6 +7,7 @@ import api from "../api/client";
 
 const SESSION_KEY = "rutina_chat_history";
 const DIARY_TOGGLE_KEY = "rutina_chat_include_diary";
+const HABIT_NOTES_TOGGLE_KEY = "rutina_chat_include_habit_notes";
 const EXCLUDED_ENTRIES_KEY = "rutina_chat_excluded_entries";
 
 function loadHistory() {
@@ -93,9 +94,13 @@ export default function AIChat() {
   const [error, setError] = useState("");
   const bottomRef = useRef(null);
 
-  // Estados de control de contexto del diario
+  // Estados de control de contexto del diario y hábitos
   const [includeDiary, setIncludeDiary] = useState(() => {
     const saved = localStorage.getItem(DIARY_TOGGLE_KEY);
+    return saved !== null ? JSON.parse(saved) : true;
+  });
+  const [includeHabitNotes, setIncludeHabitNotes] = useState(() => {
+    const saved = localStorage.getItem(HABIT_NOTES_TOGGLE_KEY);
     return saved !== null ? JSON.parse(saved) : true;
   });
   const [availableEntries, setAvailableEntries] = useState([]);
@@ -133,10 +138,14 @@ export default function AIChat() {
     fetchJournalEntries();
   }, []);
 
-  // Persistir configuración de diario
+  // Persistir configuración de diario y notas de hábitos
   useEffect(() => {
     localStorage.setItem(DIARY_TOGGLE_KEY, JSON.stringify(includeDiary));
   }, [includeDiary]);
+
+  useEffect(() => {
+    localStorage.setItem(HABIT_NOTES_TOGGLE_KEY, JSON.stringify(includeHabitNotes));
+  }, [includeHabitNotes]);
 
   const toggleEntrySelection = (id) => {
     setSelectedEntryIds((prev) => {
@@ -193,6 +202,7 @@ export default function AIChat() {
         include_diary: includeDiary,
         // Si el diario está activo y hay notas cargadas, enviamos solo los IDs seleccionados
         selected_entry_ids: includeDiary && loadedEntries ? Array.from(selectedEntryIds) : null,
+        include_habit_notes: includeHabitNotes,
       };
 
       const res = await api.post("/journal/chat", payload);
@@ -342,6 +352,22 @@ export default function AIChat() {
               El diario está desactivado. El Coach responderá de forma neutral y libre de temas de tus notas previas.
             </p>
           )}
+
+          {/* Opción de Notas y Ánimo de Hábitos */}
+          <div className="border-t border-line/60 pt-2 flex items-center justify-between">
+            <label className="flex items-center gap-2 cursor-pointer select-none font-medium text-ink">
+              <input
+                type="checkbox"
+                checked={includeHabitNotes}
+                onChange={(e) => setIncludeHabitNotes(e.target.checked)}
+                className="rounded border-line text-signal focus:ring-signal"
+              />
+              <span>Compartir notas y estados de ánimo de mis hábitos</span>
+            </label>
+            <span className="text-[10px] text-ink-faint">
+              {includeHabitNotes ? "Activo" : "Desactivado"}
+            </span>
+          </div>
         </div>
       )}
 

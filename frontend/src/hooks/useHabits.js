@@ -60,8 +60,9 @@ export function useHabits(date) {
    * Set the status for a habit on the target date.
    * status: "done" | "skipped" | "failed"
    * Passing null clears the log entirely (back to "sin registrar").
+   * extra: { mood, note } opcional
    */
-  const setHabitStatus = async (habitId, status) => {
+  const setHabitStatus = async (habitId, status, extra = {}) => {
     if (status === null) {
       // Find the log id and delete it
       const existing = logsByHabitId[habitId];
@@ -72,15 +73,20 @@ export function useHabits(date) {
       return;
     }
 
-    const res = await api.post("/logs", {
+    const payload = {
       habit_id: habitId,
       date: targetDate,
       status,
-    });
+      ...(extra.mood !== undefined ? { mood: extra.mood } : {}),
+      ...(extra.note !== undefined ? { note: extra.note } : {}),
+    };
+
+    const res = await api.post("/logs", payload);
     setLogs((prev) => {
       const rest = prev.filter((l) => l.habit_id !== habitId);
       return [...rest, res.data];
     });
+    return res.data;
   };
 
   return {
