@@ -3,6 +3,7 @@ import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutGrid, ListChecks, BarChart3, LogOut, CheckCircle2,
   UserRound, Users, BookOpen, Sparkles, UserCircle, MoreHorizontal, X,
+  Timer,
 } from "lucide-react";
 import ThemeToggle from "./ThemeToggle";
 import NotificationToggle from "./NotificationToggle";
@@ -22,6 +23,7 @@ const PRIMARY_NAV = [
 
 // Items secundarios en el drawer "más"
 const SECONDARY_NAV = [
+  { to: "/timer", label: "Timer", icon: Timer },
   { to: "/estadisticas", label: "Estadísticas", icon: BarChart3 },
   { to: "/amigos", label: "Amigos", icon: Users },
   { to: "/perfil-ia", label: "Mi perfil IA", icon: UserCircle },

@@ -167,3 +167,58 @@ class FriendStatsOut(BaseModel):
     current_streak: int
     week_completion_rate: int
     total_completed: int
+
+
+# ---------- Timer ----------
+
+class TimerHabitInfo(BaseModel):
+    id: int
+    name: str
+    category: str
+
+    class Config:
+        from_attributes = True
+
+
+class TimerSessionCreate(BaseModel):
+    habit_id: Optional[int] = None
+    start_time: datetime
+    end_time: datetime
+    duration_seconds: int = Field(ge=1)
+    session_type: str = Field(default="pomodoro", max_length=30)
+    notes: Optional[str] = Field(default="", max_length=500)
+    auto_mark_done: bool = False
+    log_date: Optional[date] = None
+
+
+class TimerSessionOut(BaseModel):
+    id: int
+    user_id: int
+    habit_id: Optional[int] = None
+    habit: Optional[TimerHabitInfo] = None
+    start_time: datetime
+    end_time: datetime
+    duration_seconds: int
+    session_type: str
+    notes: Optional[str] = ""
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class HabitTimeStat(BaseModel):
+    habit_id: Optional[int] = None
+    habit_name: str
+    category: str
+    total_seconds: int
+    session_count: int
+
+
+class TimerStatsOut(BaseModel):
+    today_seconds: int
+    week_seconds: int
+    total_seconds: int
+    today_sessions_count: int
+    habits_breakdown: list[HabitTimeStat]
+

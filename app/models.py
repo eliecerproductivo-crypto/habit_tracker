@@ -27,6 +27,7 @@ class User(Base):
     habits = relationship("Habit", back_populates="owner", cascade="all, delete-orphan")
     sent_requests = relationship("Friendship", foreign_keys="Friendship.requester_id", back_populates="requester", cascade="all, delete-orphan")
     received_requests = relationship("Friendship", foreign_keys="Friendship.addressee_id", back_populates="addressee", cascade="all, delete-orphan")
+    timer_sessions = relationship("TimerSession", back_populates="user", cascade="all, delete-orphan")
 
 
 class PasswordResetToken(Base):
@@ -73,6 +74,7 @@ class Habit(Base):
 
     owner = relationship("User", back_populates="habits")
     logs = relationship("HabitLog", back_populates="habit", cascade="all, delete-orphan")
+    timer_sessions = relationship("TimerSession", back_populates="habit", cascade="all, delete-orphan")
 
 
 class HabitLog(Base):
@@ -158,3 +160,21 @@ class UserProfile(Base):
                         onupdate=lambda: datetime.now(timezone.utc))
 
     owner = relationship("User", foreign_keys=[user_id])
+
+
+class TimerSession(Base):
+    __tablename__ = "timer_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    habit_id = Column(Integer, ForeignKey("habits.id", ondelete="CASCADE"), nullable=True, index=True)
+
+    start_time = Column(DateTime(timezone=True), nullable=False)
+    end_time = Column(DateTime(timezone=True), nullable=False)
+    duration_seconds = Column(Integer, nullable=False)
+    session_type = Column(String(30), nullable=False, default="pomodoro")
+    notes = Column(String(500), nullable=True, default="")
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User", back_populates="timer_sessions")
+    habit = relationship("Habit", back_populates="timer_sessions")

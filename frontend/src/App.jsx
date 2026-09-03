@@ -13,6 +13,7 @@ import Friends from "./pages/Friends";
 import Journal from "./pages/Journal";
 import Coach from "./pages/Coach";
 import Profile from "./pages/Profile";
+import Timer from "./pages/Timer";
 
 function FullScreenLoader() {
   return (
@@ -110,6 +111,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <Profile />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/timer"
+        element={
+          <ProtectedRoute>
+            <Timer />
           </ProtectedRoute>
         }
       />
