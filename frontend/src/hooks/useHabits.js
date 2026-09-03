@@ -30,15 +30,31 @@ export function useHabits(date) {
   }, [targetDate]);
 
   const refresh = useCallback(async () => {
-    setLoading(true);
     setError(null);
+
+    // ── Cargar caché inmediatamente (antes de tocar la red) ────────────────
+    // Así el usuario siempre ve datos, incluso si la red tarda o falla.
+    const ssHabits = ssGet("habits_cache");
+    const ssLogs   = ssGet(`logs_cache_${targetDate}`);
+    if (ssHabits?.length) { setHabits(ssHabits); setLoading(false); }
+    if (ssLogs?.length)   { setLogs(ssLogs);     setLoading(false); }
+
+    // Si no hay sessionStorage, intentar IndexedDB antes de mostrar loading
+    if (!ssHabits?.length || !ssLogs?.length) {
+      const idbH = await get("cached_habits").catch(() => null);
+      const idbL = await get(`cached_logs_${targetDate}`).catch(() => null);
+      if (idbH?.length && !ssHabits?.length) { setHabits(idbH); setLoading(false); }
+      if (idbL?.length && !ssLogs?.length)   { setLogs(idbL);   setLoading(false); }
+    }
+
+    // ── Intentar actualizar desde la red ───────────────────────────────────
+    setLoading(true);
     try {
       const [habitsRes, logsRes] = await Promise.all([
         api.get("/habits"),
         api.get("/logs", { params: { date: targetDate } }),
       ]);
 
-      // Guardar en sessionStorage (navegación) e IndexedDB (offline persistente)
       ssSet("habits_cache", habitsRes.data);
       ssSet(`logs_cache_${targetDate}`, logsRes.data);
       set("cached_habits", habitsRes.data).catch(() => {});
@@ -46,33 +62,26 @@ export function useHabits(date) {
 
       setHabits(habitsRes.data);
       setLogs(logsRes.data);
+      setError(null);
 
       syncOfflineQueue().catch(() => {});
     } catch (err) {
-      // Cualquier fallo sin respuesta del servidor = tratar como offline.
       const noResponse = !err.response;
-
       if (noResponse) {
-        // Leer caché — sessionStorage primero (misma sesión), luego IndexedDB
-        const ssHabits  = ssGet("habits_cache");
-        const ssLogs    = ssGet(`logs_cache_${targetDate}`);
-        // Leer IndexedDB siempre (independientemente del sessionStorage)
+        // Ya cargamos la caché arriba — solo mostrar el banner
         const idbHabits = await get("cached_habits").catch(() => null);
         const idbLogs   = await get(`cached_logs_${targetDate}`).catch(() => null);
+        const finalHabits = ssHabits || idbHabits || [];
+        const finalLogs   = ssLogs   || idbLogs   || [];
 
-        const finalHabits = ssHabits  || idbHabits  || [];
-        const finalLogs   = ssLogs    || idbLogs    || [];
-
-        // Debug — ver en consola del teléfono (Chrome: chrome://inspect)
-        console.log("[offline] sessionStorage habits:", ssHabits?.length ?? "null");
-        console.log("[offline] sessionStorage logs:", ssLogs?.length ?? "null");
-        console.log("[offline] IndexedDB habits:", idbHabits?.length ?? "null");
-        console.log("[offline] IndexedDB logs:", idbLogs?.length ?? "null");
-        console.log("[offline] final habits:", finalHabits.length, "final logs:", finalLogs.length);
+        console.log("[offline] ss habits:", ssHabits?.length ?? "null",
+                    "| ss logs:", ssLogs?.length ?? "null",
+                    "| idb habits:", idbHabits?.length ?? "null",
+                    "| idb logs:", idbLogs?.length ?? "null",
+                    "| final:", finalHabits.length, finalLogs.length);
 
         if (finalHabits.length > 0) setHabits(finalHabits);
         if (finalLogs.length > 0)   setLogs(finalLogs);
-
         setError("Sin conexión — mostrando datos guardados localmente.");
       } else {
         setError(err?.response?.data?.detail || "No se pudo cargar la información.");
