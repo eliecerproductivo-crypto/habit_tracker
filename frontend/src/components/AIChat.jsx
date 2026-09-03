@@ -219,7 +219,7 @@ export default function AIChat() {
   const isEmpty = history.length === 0;
 
   return (
-    <div className="flex flex-col h-[560px] rounded-2xl border border-line bg-bg overflow-hidden shadow-sm">
+    <div className="flex flex-col h-[calc(100dvh-13rem)] min-h-64 max-h-[600px] rounded-2xl border border-line bg-bg overflow-hidden shadow-sm">
       {/* Header */}
       <div className="flex items-center gap-2 border-b border-line bg-panel px-4 py-3">
         <div className="flex h-7 w-7 items-center justify-center rounded-full bg-violet-soft text-violet">
