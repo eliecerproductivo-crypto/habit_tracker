@@ -3,7 +3,7 @@ import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutGrid, ListChecks, BarChart3, LogOut, CheckCircle2,
   UserRound, Users, BookOpen, Sparkles, UserCircle, MoreHorizontal, X,
-  Timer,
+  Timer, WifiOff,
 } from "lucide-react";
 import ThemeToggle from "./ThemeToggle";
 import NotificationToggle from "./NotificationToggle";
@@ -12,6 +12,24 @@ import { useAuth } from "../context/AuthContext";
 import { useHabits } from "../hooks/useHabits";
 import { useNotifications } from "../hooks/useNotifications";
 import { useFriends } from "../hooks/useFriends";
+
+function OfflineBanner() {
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  useEffect(() => {
+    const on  = () => setIsOffline(false);
+    const off = () => setIsOffline(true);
+    window.addEventListener("online",  on);
+    window.addEventListener("offline", off);
+    return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
+  }, []);
+  if (!isOffline) return null;
+  return (
+    <div className="flex items-center justify-center gap-2 bg-signal-soft px-4 py-1.5 text-xs font-semibold text-signal border-b border-signal/20 shrink-0">
+      <WifiOff size={13} />
+      Sin conexión — tus cambios se sincronizarán al reconectar.
+    </div>
+  );
+}
 
 // Items principales en la bottom bar
 const PRIMARY_NAV = [
@@ -120,6 +138,7 @@ export default function AppShell({ children }) {
 
         {/* ── Main column ────────────────────────────────────────────────── */}
         <div className="flex min-h-dvh flex-1 flex-col">
+          <OfflineBanner />
           {/* Topbar */}
           <header className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-bg/80 px-5 py-3 backdrop-blur md:justify-end">
             <div className="flex items-center gap-2 md:hidden">
