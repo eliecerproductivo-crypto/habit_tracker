@@ -50,21 +50,26 @@ export function useHabits(date) {
       syncOfflineQueue().catch(() => {});
     } catch (err) {
       // Cualquier fallo sin respuesta del servidor = tratar como offline.
-      // No importa el código exacto: si no hay response, no hay red.
       const noResponse = !err.response;
 
       if (noResponse) {
         // Leer caché — sessionStorage primero (misma sesión), luego IndexedDB
         const ssHabits  = ssGet("habits_cache");
         const ssLogs    = ssGet(`logs_cache_${targetDate}`);
-        const idbHabits = ssHabits  ? null : await get("cached_habits").catch(() => null);
-        const idbLogs   = ssLogs    ? null : await get(`cached_logs_${targetDate}`).catch(() => null);
+        // Leer IndexedDB siempre (independientemente del sessionStorage)
+        const idbHabits = await get("cached_habits").catch(() => null);
+        const idbLogs   = await get(`cached_logs_${targetDate}`).catch(() => null);
 
         const finalHabits = ssHabits  || idbHabits  || [];
         const finalLogs   = ssLogs    || idbLogs    || [];
 
-        // Solo actualizar el estado si la caché tiene datos.
-        // Si no hay caché, conservar lo que ya está en pantalla (del useState inicial).
+        // Debug — ver en consola del teléfono (Chrome: chrome://inspect)
+        console.log("[offline] sessionStorage habits:", ssHabits?.length ?? "null");
+        console.log("[offline] sessionStorage logs:", ssLogs?.length ?? "null");
+        console.log("[offline] IndexedDB habits:", idbHabits?.length ?? "null");
+        console.log("[offline] IndexedDB logs:", idbLogs?.length ?? "null");
+        console.log("[offline] final habits:", finalHabits.length, "final logs:", finalLogs.length);
+
         if (finalHabits.length > 0) setHabits(finalHabits);
         if (finalLogs.length > 0)   setLogs(finalLogs);
 
