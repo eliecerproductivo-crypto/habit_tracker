@@ -287,7 +287,7 @@ export default function AIChat() {
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-4 py-5 flex flex-col gap-4"
+        className="flex-1 overflow-y-auto px-4 py-5 pb-20 md:pb-5 flex flex-col gap-4"
       >
         {isEmpty && (
           <div className="flex flex-col items-center gap-4 py-10 text-center">
@@ -332,7 +332,7 @@ export default function AIChat() {
       )}
 
       {/* ── Input pegado al fondo ── */}
-      <div className="shrink-0 bg-panel px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
+      <div className="shrink-0 bg-panel px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] fixed bottom-14 inset-x-0 z-10 border-t border-line md:static md:bottom-auto md:z-auto md:border-t-0">
         <div className="mx-auto flex max-w-2xl items-end gap-2">
           <textarea
             ref={textareaRef}
