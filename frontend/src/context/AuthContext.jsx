@@ -3,6 +3,22 @@ import api, { getToken, setToken, setUnauthorizedHandler } from "../api/client";
 
 const AuthContext = createContext(null);
 
+const USER_CACHE_KEY = "rutina_cached_user";
+
+function getCachedUser() {
+  try {
+    const raw = localStorage.getItem(USER_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function setCachedUser(user) {
+  try {
+    if (user) localStorage.setItem(USER_CACHE_KEY, JSON.stringify(user));
+    else localStorage.removeItem(USER_CACHE_KEY);
+  } catch {}
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -10,17 +26,29 @@ export function AuthProvider({ children }) {
   const loadMe = useCallback(async () => {
     if (!getToken()) {
       setUser(null);
+      setCachedUser(null);
       setLoading(false);
       return;
     }
     try {
       const res = await api.get("/auth/me");
       setUser(res.data);
+      setCachedUser(res.data);   // guardar para uso offline
     } catch (err) {
-      // Solo limpiar sesión en 401, no en timeouts u otros errores de red
       if (err?.response?.status === 401) {
+        // Token expirado o inválido → limpiar todo
         setToken(null);
         setUser(null);
+        setCachedUser(null);
+      } else {
+        // Error de red / timeout → usar datos cacheados si existen
+        const cached = getCachedUser();
+        if (cached) {
+          setUser(cached);
+        } else {
+          // No hay caché y no hay red: dejar user=null para no mostrar app rota
+          setUser(null);
+        }
       }
     } finally {
       setLoading(false);
@@ -28,9 +56,68 @@ export function AuthProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    setUnauthorizedHandler(() => setUser(null));
+    setUnauthorizedHandler(() => {
+      setUser(null);
+      setCachedUser(null);
+    });
     loadMe();
   }, [loadMe]);
+
+  const login = async (email, password) => {
+    const form = new URLSearchParams();
+    form.set("username", email);
+    form.set("password", password);
+    const res = await api.post("/auth/login", form, {
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    });
+    setToken(res.data.access_token);
+    await loadMe();
+  };
+
+  const register = async (name, email, password) => {
+    await api.post("/auth/register", { name, email, password });
+    await login(email, password);
+  };
+
+  const logout = () => {
+    setToken(null);
+    setUser(null);
+    setCachedUser(null);
+  };
+
+  const updateProfile = async (name, email) => {
+    const res = await api.put("/auth/me", { name, email });
+    setUser(res.data);
+    setCachedUser(res.data);
+    return res.data;
+  };
+
+  const changePassword = async (currentPassword, newPassword) => {
+    await api.put("/auth/me/password", {
+      current_password: currentPassword,
+      new_password: newPassword,
+    });
+  };
+
+  const deleteAccount = async () => {
+    await api.delete("/auth/me");
+    logout();
+  };
+
+  return (
+    <AuthContext.Provider
+      value={{ user, loading, login, register, logout, updateProfile, changePassword, deleteAccount }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth() {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
+  return ctx;
+}
 
   const login = async (email, password) => {
     const form = new URLSearchParams();
