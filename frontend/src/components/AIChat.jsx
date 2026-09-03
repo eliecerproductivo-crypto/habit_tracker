@@ -190,27 +190,9 @@ export default function AIChat() {
     <div className="flex flex-1 flex-col overflow-hidden">
 
       {/* ── Topbar del chat ── */}
-      <div className="shrink-0 flex items-center gap-2 border-b border-line bg-panel px-4 py-2.5">
-        <div className="flex h-7 w-7 items-center justify-center rounded-full bg-violet-soft text-violet">
-          <Sparkles size={14} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <p className="text-sm font-semibold text-ink">Coach IA</p>
-            <span className={[
-              "text-[10px] font-semibold px-1.5 py-0.5 rounded-full",
-              includeDiary && selectedEntryIds.size > 0
-                ? "bg-violet-soft text-violet"
-                : "bg-panel-alt text-ink-faint",
-            ].join(" ")}>
-              {includeDiary
-                ? `${selectedEntryIds.size} ${selectedEntryIds.size === 1 ? "nota" : "notas"}`
-                : "sin diario"}
-            </span>
-          </div>
-        </div>
+      <div className="shrink-0 flex items-center justify-end gap-2 border-b border-line bg-panel px-4 py-2.5">
 
-        {/* Botón selector de notas */}
+        {/* Botón de configuración / notas */}
         <button
           onClick={() => setIsPanelOpen((o) => !o)}
           className={[
@@ -221,7 +203,7 @@ export default function AIChat() {
           ].join(" ")}
         >
           <BookOpen size={13} className={includeDiary ? "text-violet" : "text-ink-faint"} />
-          <span className="hidden sm:inline">Notas</span>
+          Notas
           {isPanelOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
         </button>
 
@@ -350,7 +332,7 @@ export default function AIChat() {
       )}
 
       {/* ── Input pegado al fondo ── */}
-      <div className="shrink-0 border-t border-line bg-panel px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
+      <div className="shrink-0 bg-panel px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
         <div className="mx-auto flex max-w-2xl items-end gap-2">
           <textarea
             ref={textareaRef}
