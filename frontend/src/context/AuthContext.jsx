@@ -33,7 +33,7 @@ export function AuthProvider({ children }) {
     try {
       const res = await api.get("/auth/me");
       setUser(res.data);
-      setCachedUser(res.data);   // guardar para uso offline
+      setCachedUser(res.data);
     } catch (err) {
       if (err?.response?.status === 401) {
         // Token expirado o inválido → limpiar todo
@@ -43,12 +43,7 @@ export function AuthProvider({ children }) {
       } else {
         // Error de red / timeout → usar datos cacheados si existen
         const cached = getCachedUser();
-        if (cached) {
-          setUser(cached);
-        } else {
-          // No hay caché y no hay red: dejar user=null para no mostrar app rota
-          setUser(null);
-        }
+        setUser(cached || null);
       }
     } finally {
       setLoading(false);
@@ -89,60 +84,6 @@ export function AuthProvider({ children }) {
     const res = await api.put("/auth/me", { name, email });
     setUser(res.data);
     setCachedUser(res.data);
-    return res.data;
-  };
-
-  const changePassword = async (currentPassword, newPassword) => {
-    await api.put("/auth/me/password", {
-      current_password: currentPassword,
-      new_password: newPassword,
-    });
-  };
-
-  const deleteAccount = async () => {
-    await api.delete("/auth/me");
-    logout();
-  };
-
-  return (
-    <AuthContext.Provider
-      value={{ user, loading, login, register, logout, updateProfile, changePassword, deleteAccount }}
-    >
-      {children}
-    </AuthContext.Provider>
-  );
-}
-
-export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
-  return ctx;
-}
-
-  const login = async (email, password) => {
-    const form = new URLSearchParams();
-    form.set("username", email);
-    form.set("password", password);
-    const res = await api.post("/auth/login", form, {
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    });
-    setToken(res.data.access_token);
-    await loadMe();
-  };
-
-  const register = async (name, email, password) => {
-    await api.post("/auth/register", { name, email, password });
-    await login(email, password);
-  };
-
-  const logout = () => {
-    setToken(null);
-    setUser(null);
-  };
-
-  const updateProfile = async (name, email) => {
-    const res = await api.put("/auth/me", { name, email });
-    setUser(res.data);
     return res.data;
   };
 
