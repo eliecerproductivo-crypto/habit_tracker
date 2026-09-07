@@ -319,6 +319,8 @@ export default function AIChat() {
         {error && (
           <p className="rounded-xl bg-coral-soft px-4 py-2.5 text-sm text-coral text-center">{error}</p>
         )}
+        {/* Spacer para que el input fijo no tape el último mensaje */}
+        <div className="shrink-0 h-20 md:h-4" />
         <div ref={bottomRef} />
       </div>
 
