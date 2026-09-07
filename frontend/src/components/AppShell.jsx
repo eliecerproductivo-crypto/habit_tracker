@@ -90,7 +90,7 @@ export default function AppShell({ children }) {
   const isSecondaryActive = SECONDARY_NAV.some((item) => location.pathname === item.to);
 
   return (
-    <div className="min-h-dvh overflow-x-hidden bg-bg text-ink">
+    <div className="min-h-dvh bg-bg text-ink">
       <div className="mx-auto flex w-full">
 
         {/* ── Sidebar (desktop) ──────────────────────────────────────────── */}
@@ -137,7 +137,7 @@ export default function AppShell({ children }) {
         </aside>
 
         {/* ── Main column ────────────────────────────────────────────────── */}
-        <div className="flex min-h-dvh flex-1 flex-col">
+        <div className="flex min-h-dvh min-w-0 flex-1 flex-col">
           <OfflineBanner />
           {/* Topbar */}
           <header className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-bg/80 px-5 py-3 backdrop-blur md:justify-end">
