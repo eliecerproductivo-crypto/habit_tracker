@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { ThemeProvider } from "./context/ThemeContext";
 import AppShell from "./components/AppShell";
@@ -23,11 +23,41 @@ function FullScreenLoader() {
   );
 }
 
-function ProtectedRoute({ children }) {
+// Páginas protegidas con sus rutas. Se renderizan TODAS siempre;
+// la que no está activa se oculta con CSS (display:none) para que
+// el estado interno (timer corriendo, chat, etc.) nunca se destruya.
+const PROTECTED_PAGES = [
+  { path: "/",            Page: Dashboard,  exact: true },
+  { path: "/habitos",     Page: Habits },
+  { path: "/estadisticas",Page: Stats },
+  { path: "/amigos",      Page: Friends },
+  { path: "/diario",      Page: Journal },
+  { path: "/coach",       Page: Coach },
+  { path: "/perfil-ia",   Page: Profile },
+  { path: "/timer",       Page: Timer },
+];
+
+function ProtectedApp() {
   const { user, loading } = useAuth();
+  const location = useLocation();
+
   if (loading) return <FullScreenLoader />;
   if (!user) return <Navigate to="/login" replace />;
-  return <AppShell>{children}</AppShell>;
+
+  return (
+    <AppShell activePath={location.pathname}>
+      {PROTECTED_PAGES.map(({ path, Page, exact }) => {
+        const isActive = exact
+          ? location.pathname === path
+          : location.pathname === path || location.pathname.startsWith(path + "/");
+        return (
+          <div key={path} className={isActive ? "contents" : "hidden"}>
+            <Page />
+          </div>
+        );
+      })}
+    </AppShell>
+  );
 }
 
 function PublicOnlyRoute({ children }) {
@@ -40,89 +70,12 @@ function PublicOnlyRoute({ children }) {
 function AppRoutes() {
   return (
     <Routes>
-      <Route
-        path="/login"
-        element={
-          <PublicOnlyRoute>
-            <Login />
-          </PublicOnlyRoute>
-        }
-      />
-      <Route
-        path="/registro"
-        element={
-          <PublicOnlyRoute>
-            <Register />
-          </PublicOnlyRoute>
-        }
-      />
-      <Route path="/recuperar" element={<ForgotPassword />} />
+      <Route path="/login"    element={<PublicOnlyRoute><Login /></PublicOnlyRoute>} />
+      <Route path="/registro" element={<PublicOnlyRoute><Register /></PublicOnlyRoute>} />
+      <Route path="/recuperar"    element={<ForgotPassword />} />
       <Route path="/reset-password" element={<ResetPassword />} />
-      <Route
-        path="/"
-        element={
-          <ProtectedRoute>
-            <Dashboard />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/habitos"
-        element={
-          <ProtectedRoute>
-            <Habits />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/estadisticas"
-        element={
-          <ProtectedRoute>
-            <Stats />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/amigos"
-        element={
-          <ProtectedRoute>
-            <Friends />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/diario"
-        element={
-          <ProtectedRoute>
-            <Journal />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/coach"
-        element={
-          <ProtectedRoute>
-            <Coach />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/perfil-ia"
-        element={
-          <ProtectedRoute>
-            <Profile />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/timer"
-        element={
-          <ProtectedRoute>
-            <Timer />
-          </ProtectedRoute>
-        }
-      />
-      <Route path="*" element={<Navigate to="/" replace />} />
+      {/* Todas las rutas protegidas van a ProtectedApp */}
+      <Route path="/*" element={<ProtectedApp />} />
     </Routes>
   );
 }

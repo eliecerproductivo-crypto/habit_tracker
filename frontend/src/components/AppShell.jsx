@@ -74,7 +74,10 @@ function SidebarNavItem({ to, label, icon: Icon, end, badge }) {
   );
 }
 
-export default function AppShell({ children }) {
+// Rutas donde el main necesita layout de flex columna sin padding (chat ocupa todo)
+const FULLSCREEN_PATHS = ["/coach"];
+
+export default function AppShell({ children, activePath }) {
   const { user, logout } = useAuth();
   const { habits } = useHabits();
   const { permission, advanceMinutes, requestPermission, setAdvanceMinutes } = useNotifications(habits);
@@ -167,7 +170,7 @@ export default function AppShell({ children }) {
 
           <main className={[
             "flex-1",
-            location.pathname === "/coach"
+            FULLSCREEN_PATHS.includes(activePath)
               ? "flex flex-col overflow-hidden"
               : "px-5 pb-24 pt-4 md:px-8 md:pb-10 md:pt-6",
           ].join(" ")}>
