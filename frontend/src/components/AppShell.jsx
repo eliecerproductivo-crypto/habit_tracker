@@ -90,8 +90,8 @@ export default function AppShell({ children }) {
   const isSecondaryActive = SECONDARY_NAV.some((item) => location.pathname === item.to);
 
   return (
-    <div className="min-h-dvh bg-bg text-ink">
-      <div className="mx-auto flex max-w-screen">
+    <div className="min-h-dvh overflow-x-hidden bg-bg text-ink">
+      <div className="mx-auto flex w-full">
 
         {/* ── Sidebar (desktop) ──────────────────────────────────────────── */}
         <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-line px-4 py-6 md:flex">

@@ -69,7 +69,7 @@ export default function Dashboard() {
             date={selectedDate}
           />
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-3 gap-2">
             <StatCard
               label={isToday ? "Hoy" : "Ese día"}
               value={`${pct}%`}
