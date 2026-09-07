@@ -288,7 +288,7 @@ export default function AIChat() {
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-4 py-5 pb-20 md:pb-5 flex flex-col gap-4"
+        className="flex-1 overflow-y-auto px-4 py-5 pb-32 md:pb-8 flex flex-col gap-4"
       >
         {isEmpty && (
           <div className="flex flex-col items-center gap-4 py-10 text-center">

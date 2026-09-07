@@ -193,10 +193,11 @@ def chat_with_context(
     stats: dict | None = None,
     bio_summary: str | None = None,
     recent_notes: list[str] | None = None,
+    habit_notes: list[str] | None = None,
 ) -> Optional[str]:
     """
     Responde al usuario usando perfil personal, hábitos, estadísticas,
-    notas recientes y resúmenes del diario como contexto.
+    notas recientes, notas de hábitos y resúmenes del diario como contexto.
     """
     # ── Perfil ────────────────────────────────────────────────────────────────
     bio_block = f"\n\nQUIÉN SOY (perfil del usuario):\n{bio_summary}" if bio_summary else ""
@@ -222,11 +223,17 @@ def chat_with_context(
             f"{nota_line}"
         )
 
-    # ── Notas recientes en texto completo (últimos 3 días) ────────────────────
+    # ── Notas recientes del diario general en texto completo ──────────────────
     notes_block = ""
     if recent_notes:
         notes_text = "\n".join(recent_notes)
-        notes_block = f"\n\nNOTAS RECIENTES DEL DIARIO (texto completo, últimos 3 días):\n{notes_text}"
+        notes_block = f"\n\nNOTAS RECIENTES DEL DIARIO GENERAL:\n{notes_text}"
+
+    # ── Notas y estado de ánimo específicos de cada hábito ────────────────────
+    habit_notes_block = ""
+    if habit_notes:
+        habit_notes_text = "\n".join(habit_notes)
+        habit_notes_block = f"\n\nSENSACIONES Y NOTAS AL REGISTRAR HÁBITOS (últimos días):\n{habit_notes_text}"
 
     # ── Resúmenes históricos del diario ───────────────────────────────────────
     diary_block = (
@@ -238,18 +245,23 @@ def chat_with_context(
     system_prompt = (
         "Eres un coach personal de hábitos y productividad. "
         "Tu objetivo es ayudar al usuario a entender sus patrones, mejorar su rutina y superar bloqueos. "
-        "Usa el contexto completo (perfil, hábitos, estadísticas, notas recientes y diario) "
+        "Usa el contexto completo (perfil, hábitos, estadísticas, notas recientes, sensaciones de hábitos y diario) "
         "para dar respuestas personalizadas y concretas. "
         "Responde siempre en español, de forma empática pero directa. "
         "Sé conciso: cada palabra debe aportar valor. Elimina relleno, repeticiones y frases obvias. "
         "Si la respuesta puede ser corta sin perder sustancia, que sea corta. "
         "Si necesita más detalle, dalo, pero sin paja. "
         "Texto plano, sin markdown, sin asteriscos, sin almohadillas, sin viñetas. Párrafos normales. "
+        "IMPORTANTE sobre las notas y diario: Son antecedentes de momentos específicos pasados. "
+        "NO asumas que un malestar, desánimo o problema de días previos sigue activo hoy a menos que el usuario "
+        "lo mencione directamente en su mensaje actual. Si el usuario saluda o pregunta algo nuevo, responde al presente "
+        "sin revivir problemas pasados a menos que sean directamente relevantes a su pregunta. "
         "IMPORTANTE: si las estadísticas incluyen una nota temporal (usuario nuevo), "
         "NO uses el porcentaje de cumplimiento para hacer juicios negativos — "
         "es demasiado pronto para evaluar tendencias.\n\n"
         f"RESÚMENES DEL DIARIO (contexto histórico):\n{diary_block}"
         f"{notes_block}"
+        f"{habit_notes_block}"
         f"{bio_block}"
         f"{habits_block}"
         f"{stats_block}"
@@ -422,6 +434,16 @@ def _migrate(connection):
                     "ALTER TABLE habit_logs DROP COLUMN IF EXISTS completed"
                 ))
 
+        if "mood" not in columns:
+            connection.execute(text(
+                "ALTER TABLE habit_logs ADD COLUMN mood VARCHAR(20) DEFAULT NULL"
+            ))
+
+        if "note" not in columns:
+            connection.execute(text(
+                "ALTER TABLE habit_logs ADD COLUMN note VARCHAR(500) DEFAULT ''"
+            ))
+
     # ── habits: start_time / end_time → nullable ───────────────────────────
     if "habits" in tables:
         dialect = connection.dialect.name
@@ -467,6 +489,25 @@ def _migrate(connection):
                 "THEN ALTER TABLE categories ADD CONSTRAINT uq_category_user_name UNIQUE (user_id, name); "
                 "END IF; END $$;"
             ))
+
+    # ── wildcard_balance: tabla de comodines ──────────────────────────────
+    # create_all la crea si no existe; este bloque solo añade columnas faltantes
+    # si la tabla fue creada por una versión anterior sin ellas.
+    if "wildcard_balance" in inspector.get_table_names():
+        wc_cols = {c["name"] for c in inspector.get_columns("wildcard_balance")}
+        if "last_milestone" not in wc_cols:
+            connection.execute(text(
+                "ALTER TABLE wildcard_balance ADD COLUMN last_milestone INTEGER NOT NULL DEFAULT 0"
+            ))
+        if "last_used_date" not in wc_cols:
+            connection.execute(text(
+                "ALTER TABLE wildcard_balance ADD COLUMN last_used_date DATE DEFAULT NULL"
+            ))
+        if "updated_at" not in wc_cols:
+            connection.execute(text(
+                "ALTER TABLE wildcard_balance ADD COLUMN updated_at TIMESTAMP DEFAULT NULL"
+            ))
+
 
 def init_db():
     # Creates tables if they don't exist yet, then applies pending migrations.
@@ -562,7 +603,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import init_db
-from app.routers import auth, habits, logs, stats, friends, categories, journal, profile
+from app.routers import auth, habits, logs, stats, friends, categories, journal, profile, timer, wildcards
 
 app = FastAPI(title="Rutina API", version="1.0.0")
 
@@ -611,6 +652,9 @@ app.include_router(friends.router)
 app.include_router(categories.router)
 app.include_router(journal.router)
 app.include_router(profile.router)
+app.include_router(timer.router)
+app.include_router(wildcards.router)
+
 
 
 === app\models.py ===
@@ -643,6 +687,7 @@ class User(Base):
     habits = relationship("Habit", back_populates="owner", cascade="all, delete-orphan")
     sent_requests = relationship("Friendship", foreign_keys="Friendship.requester_id", back_populates="requester", cascade="all, delete-orphan")
     received_requests = relationship("Friendship", foreign_keys="Friendship.addressee_id", back_populates="addressee", cascade="all, delete-orphan")
+    timer_sessions = relationship("TimerSession", back_populates="user", cascade="all, delete-orphan")
 
 
 class PasswordResetToken(Base):
@@ -689,6 +734,7 @@ class Habit(Base):
 
     owner = relationship("User", back_populates="habits")
     logs = relationship("HabitLog", back_populates="habit", cascade="all, delete-orphan")
+    timer_sessions = relationship("TimerSession", back_populates="habit", cascade="all, delete-orphan")
 
 
 class HabitLog(Base):
@@ -702,6 +748,8 @@ class HabitLog(Base):
     date = Column(Date, nullable=False, default=date.today, index=True)
     # "done" = lo hice | "skipped" = no pude (omitido) | "failed" = no quise (fallido)
     status = Column(String(10), nullable=False, default="done")
+    mood = Column(String(20), nullable=True, default=None)  # "great", "good", "neutral", "tired", "hard"
+    note = Column(String(500), nullable=True, default="")
     logged_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     habit = relationship("Habit", back_populates="logs")
@@ -774,6 +822,52 @@ class UserProfile(Base):
                         onupdate=lambda: datetime.now(timezone.utc))
 
     owner = relationship("User", foreign_keys=[user_id])
+
+
+class WildcardBalance(Base):
+    """
+    Saldo de comodines del usuario.
+    Un comodín protege la racha cuando el usuario no puede completar todos
+    sus hábitos un día determinado.
+
+    Reglas de negocio:
+      - Se gana 1 comodín cada 15 días de racha (hitos: 15, 30, 45, …).
+      - Tope máximo de 2 comodines en cualquier momento.
+      - No se pueden usar dos comodines en días consecutivos.
+      - last_milestone: el último múltiplo de 15 por el que ya se otorgó comodín,
+        para no otorgar el mismo hito dos veces.
+      - last_used_date: fecha en la que se usó el último comodín (control anti-consecutivo).
+    """
+    __tablename__ = "wildcard_balance"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False, index=True)
+    balance = Column(Integer, nullable=False, default=0)          # 0–2
+    last_milestone = Column(Integer, nullable=False, default=0)   # último múltiplo de 15 otorgado
+    last_used_date = Column(Date, nullable=True, default=None)     # para regla anti-consecutivo
+    updated_at = Column(DateTime(timezone=True),
+                        default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc))
+
+    owner = relationship("User", foreign_keys=[user_id])
+
+
+class TimerSession(Base):
+    __tablename__ = "timer_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    habit_id = Column(Integer, ForeignKey("habits.id", ondelete="CASCADE"), nullable=True, index=True)
+
+    start_time = Column(DateTime(timezone=True), nullable=False)
+    end_time = Column(DateTime(timezone=True), nullable=False)
+    duration_seconds = Column(Integer, nullable=False)
+    session_type = Column(String(30), nullable=False, default="pomodoro")
+    notes = Column(String(500), nullable=True, default="")
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User", back_populates="timer_sessions")
+    habit = relationship("Habit", back_populates="timer_sessions")
 
 
 === app\routers\__init__.py ===
@@ -1592,6 +1686,9 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=1000)
     history: list[ChatMessage] = []  # historial de la sesión actual
+    include_diary: bool = True       # si se incluye contexto del diario o no
+    selected_entry_ids: list[int] | None = None  # IDs específicos de notas a enviar como contexto
+    include_habit_notes: bool = True # si se incluyen sensaciones y notas de hábitos
 
 
 class ChatResponse(BaseModel):
@@ -1669,33 +1766,85 @@ def chat(
             f"  • {h.name} [{h.category}]{desc_str} — {time_str} — {freq_str}"
         )
 
-    # ── 4. Notas recientes en texto completo (hoy y últimos 3 días) ───────────
-    recent_entries = (
-        db.query(models.JournalEntry)
-        .filter(
-            models.JournalEntry.user_id == current_user.id,
-            models.JournalEntry.entry_date >= today - timedelta(days=3),
-        )
-        .order_by(models.JournalEntry.entry_date.asc())
-        .all()
-    )
-    recent_notes_lines = [
-        f"  [{e.entry_date}] {e.content}"
-        for e in recent_entries
-    ]
+    # ── 4. Notas seleccionadas del diario ───────────────────────────────────────
+    recent_notes_lines = []
+    diary_context = []
 
-    # ── 5. Resúmenes del diario (últimos 7, para contexto histórico) ──────────
-    recent_summaries = (
-        db.query(models.JournalSummary)
-        .filter(models.JournalSummary.user_id == current_user.id)
-        .order_by(models.JournalSummary.date_to.desc())
-        .limit(7)
-        .all()
-    )
-    diary_context = [
-        f"[{s.date_from}] {s.summary}"
-        for s in reversed(recent_summaries)
-    ]
+    if payload.include_diary:
+        if payload.selected_entry_ids is not None:
+            # El usuario eligió notas específicas
+            if payload.selected_entry_ids:
+                selected_entries = (
+                    db.query(models.JournalEntry)
+                    .filter(
+                        models.JournalEntry.user_id == current_user.id,
+                        models.JournalEntry.id.in_(payload.selected_entry_ids),
+                    )
+                    .order_by(models.JournalEntry.entry_date.asc())
+                    .all()
+                )
+                recent_notes_lines = [
+                    f"  [{e.entry_date}] {e.content}"
+                    for e in selected_entries
+                ]
+            # Si envió lista vacía, significa que no seleccionó ninguna nota
+        else:
+            # Comportamiento por defecto si no especifica lista de IDs: notas de los últimos 7 días
+            recent_entries = (
+                db.query(models.JournalEntry)
+                .filter(
+                    models.JournalEntry.user_id == current_user.id,
+                    models.JournalEntry.entry_date >= today - timedelta(days=7),
+                )
+                .order_by(models.JournalEntry.entry_date.asc())
+                .all()
+            )
+            recent_notes_lines = [
+                f"  [{e.entry_date}] {e.content}"
+                for e in recent_entries
+            ]
+
+            # ── 5. Resúmenes del diario (solo si no se especificaron notas puntuales)
+            recent_summaries = (
+                db.query(models.JournalSummary)
+                .filter(models.JournalSummary.user_id == current_user.id)
+                .order_by(models.JournalSummary.date_to.desc())
+                .limit(5)
+                .all()
+            )
+            diary_context = [
+                f"[{s.date_from}] {s.summary}"
+                for s in reversed(recent_summaries)
+            ]
+
+    # ── 5.5 Notas y sensaciones de hábitos ────────────────────────────────────
+    habit_notes_lines = []
+    if payload.include_habit_notes:
+        recent_habit_logs = (
+            db.query(models.HabitLog)
+            .join(models.Habit, models.Habit.id == models.HabitLog.habit_id)
+            .filter(
+                models.HabitLog.user_id == current_user.id,
+                models.HabitLog.date >= today - timedelta(days=7),
+                (models.HabitLog.note != "") | (models.HabitLog.mood.isnot(None)),
+            )
+            .order_by(models.HabitLog.date.desc())
+            .limit(15)
+            .all()
+        )
+        MOOD_MAP = {
+            "great": "🤩 Genial",
+            "good": "😊 Bien",
+            "neutral": "😐 Normal",
+            "tired": "🥱 Cansado",
+            "hard": "😫 Difícil",
+        }
+        for log in recent_habit_logs:
+            mood_str = f" [Ánimo: {MOOD_MAP.get(log.mood, log.mood)}]" if log.mood else ""
+            note_str = f': "{log.note}"' if log.note else ""
+            habit_name = log.habit.name if log.habit else f"Hábito #{log.habit_id}"
+            status_es = "Completado" if log.status == "done" else ("Omitido" if log.status == "skipped" else "Fallido")
+            habit_notes_lines.append(f"  • [{log.date}] {habit_name} ({status_es}){mood_str}{note_str}")
 
     # ── 6. Estadísticas ───────────────────────────────────────────────────────
     from app.routers.stats import compute_user_stats
@@ -1713,6 +1862,7 @@ def chat(
         context_summaries=diary_context,
         habits_text="\n".join(habits_lines) if habits_lines else "Sin hábitos registrados.",
         recent_notes=recent_notes_lines,
+        habit_notes=habit_notes_lines,
         stats={
             "dias_en_app": days_in_app,
             "racha_actual": user_stats.current_streak,
@@ -1790,6 +1940,10 @@ def upsert_log(
 
     if log:
         log.status = payload.status
+        if payload.mood is not None:
+            log.mood = payload.mood
+        if payload.note is not None:
+            log.note = payload.note
         log.logged_at = datetime.now(timezone.utc)
     else:
         log = models.HabitLog(
@@ -1797,6 +1951,8 @@ def upsert_log(
             user_id=current_user.id,
             date=payload.date,
             status=payload.status,
+            mood=payload.mood,
+            note=payload.note or "",
         )
         db.add(log)
 
@@ -1825,9 +1981,13 @@ def delete_log(
 
 
 === app\routers\profile.py ===
+import csv
+import io
+import zipfile
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -1922,6 +2082,221 @@ def summarize_profile(
     db.commit()
     db.refresh(profile)
     return profile
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Exportación completa de datos → ZIP con 5 CSVs
+# ──────────────────────────────────────────────────────────────────────────────
+
+_MOOD_LABELS = {
+    "great": "😄 Excelente",
+    "good": "🙂 Bien",
+    "neutral": "😐 Neutral",
+    "tired": "😴 Cansado/a",
+    "hard": "😤 Difícil",
+}
+
+_STATUS_LABELS = {
+    "done": "Hecho",
+    "skipped": "Omitido",
+    "failed": "Fallido",
+}
+
+_DAYS_MAP = {
+    "0": "Dom",
+    "1": "Lun",
+    "2": "Mar",
+    "3": "Mié",
+    "4": "Jue",
+    "5": "Vie",
+    "6": "Sáb",
+}
+
+
+def _make_csv(headers: list[str], rows: list[list]) -> bytes:
+    """Genera un CSV codificado en UTF-8 con BOM para compatibilidad con Excel."""
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(headers)
+    writer.writerows(rows)
+    return buf.getvalue().encode("utf-8-sig")
+
+
+@router.get("/export")
+def export_data(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Exporta todos los datos del usuario en un archivo ZIP que contiene 5 CSVs:
+      - habitos.csv
+      - historial_habitos.csv
+      - sesiones_temporizador.csv
+      - diario.csv
+      - perfil.csv
+    """
+    uid = current_user.id
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # ── 1. habitos.csv ──────────────────────────────────────────────────────
+    habits = db.query(models.Habit).filter(models.Habit.user_id == uid).all()
+    habits_csv = _make_csv(
+        [
+            "ID",
+            "Nombre",
+            "Descripción",
+            "Categoría",
+            "Días",
+            "Hora inicio",
+            "Hora fin",
+            "Duración (min)",
+            "Recurrencia",
+            "Intervalo (días)",
+            "Día del mes",
+            "Fecha inicio",
+            "Activo",
+            "Creado en",
+        ],
+        [
+            [
+                h.id,
+                h.name,
+                h.description or "",
+                h.category,
+                ", ".join(
+                    _DAYS_MAP.get(d.strip(), d.strip())
+                    for d in (h.days_of_week or "").split(",")
+                    if d.strip()
+                ),
+                h.start_time or "",
+                h.end_time or "",
+                h.duration_minutes if h.duration_minutes is not None else "",
+                h.recurrence_type,
+                h.recurrence_interval if h.recurrence_interval is not None else "",
+                h.recurrence_day_of_month if h.recurrence_day_of_month is not None else "",
+                str(h.start_date) if h.start_date else "",
+                "Sí" if h.is_active else "No",
+                h.created_at.strftime("%Y-%m-%d %H:%M") if h.created_at else "",
+            ]
+            for h in habits
+        ],
+    )
+
+    # ── 2. historial_habitos.csv ────────────────────────────────────────────
+    # Join con Habit para incluir el nombre
+    logs = (
+        db.query(models.HabitLog, models.Habit.name)
+        .join(models.Habit, models.HabitLog.habit_id == models.Habit.id)
+        .filter(models.HabitLog.user_id == uid)
+        .order_by(models.HabitLog.date.desc())
+        .all()
+    )
+    logs_csv = _make_csv(
+        ["Fecha", "Hábito", "Estado", "Estado de ánimo", "Nota", "Registrado en"],
+        [
+            [
+                str(log.date),
+                habit_name,
+                _STATUS_LABELS.get(log.status, log.status),
+                _MOOD_LABELS.get(log.mood, log.mood or ""),
+                log.note or "",
+                log.logged_at.strftime("%Y-%m-%d %H:%M") if log.logged_at else "",
+            ]
+            for log, habit_name in logs
+        ],
+    )
+
+    # ── 3. sesiones_temporizador.csv ────────────────────────────────────────
+    sessions = (
+        db.query(models.TimerSession)
+        .filter(models.TimerSession.user_id == uid)
+        .order_by(models.TimerSession.start_time.desc())
+        .all()
+    )
+    # Pre-cargar nombres de hábitos para evitar N+1
+    habit_ids = {s.habit_id for s in sessions if s.habit_id}
+    habit_names: dict[int, str] = {}
+    if habit_ids:
+        habit_names = {
+            h.id: h.name
+            for h in db.query(models.Habit).filter(models.Habit.id.in_(habit_ids)).all()
+        }
+    sessions_csv = _make_csv(
+        [
+            "Tipo",
+            "Hábito asociado",
+            "Inicio",
+            "Fin",
+            "Minutos dedicados",
+            "Notas",
+        ],
+        [
+            [
+                s.session_type,
+                habit_names.get(s.habit_id, "") if s.habit_id else "",
+                s.start_time.strftime("%Y-%m-%d %H:%M") if s.start_time else "",
+                s.end_time.strftime("%Y-%m-%d %H:%M") if s.end_time else "",
+                round(s.duration_seconds / 60, 1) if s.duration_seconds else 0,
+                s.notes or "",
+            ]
+            for s in sessions
+        ],
+    )
+
+    # ── 4. diario.csv ───────────────────────────────────────────────────────
+    entries = (
+        db.query(models.JournalEntry)
+        .filter(models.JournalEntry.user_id == uid)
+        .order_by(models.JournalEntry.entry_date.desc())
+        .all()
+    )
+    journal_csv = _make_csv(
+        ["Fecha", "Reflexión", "Creado en", "Actualizado en"],
+        [
+            [
+                str(e.entry_date),
+                e.content,
+                e.created_at.strftime("%Y-%m-%d %H:%M") if e.created_at else "",
+                e.updated_at.strftime("%Y-%m-%d %H:%M") if e.updated_at else "",
+            ]
+            for e in entries
+        ],
+    )
+
+    # ── 5. perfil.csv ───────────────────────────────────────────────────────
+    profile = (
+        db.query(models.UserProfile)
+        .filter(models.UserProfile.user_id == uid)
+        .first()
+    )
+    profile_csv = _make_csv(
+        ["Campo", "Valor"],
+        [
+            ["Nombre", current_user.name],
+            ["Correo", current_user.email],
+            ["Cuenta creada", current_user.created_at.strftime("%Y-%m-%d") if current_user.created_at else ""],
+            ["Bio", profile.bio if profile else ""],
+            ["Resumen IA", profile.bio_summary if profile and profile.bio_summary else ""],
+            ["Perfil actualizado", profile.updated_at.strftime("%Y-%m-%d %H:%M") if profile and profile.updated_at else ""],
+        ],
+    )
+
+    # ── Empaquetar en ZIP ───────────────────────────────────────────────────
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("habitos.csv", habits_csv)
+        zf.writestr("historial_habitos.csv", logs_csv)
+        zf.writestr("sesiones_temporizador.csv", sessions_csv)
+        zf.writestr("diario.csv", journal_csv)
+        zf.writestr("perfil.csv", profile_csv)
+
+    return Response(
+        content=zip_buf.getvalue(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="rutina_export_{today_str}.zip"',
+        },
+    )
 
 
 === app\routers\stats.py ===
@@ -2055,10 +2430,10 @@ def compute_user_stats(db: Session, user: models.User) -> schemas.StatsSummary:
     today = date_type.today()
 
     current_streak = 0
-    # Si hoy ya tiene al menos un log, lo incluimos en la racha.
-    # Si aún no hay logs hoy (el día no ha terminado), empezamos desde ayer.
-    today_has_logs = bool(status_by_date.get(today))
-    cursor = today if today_has_logs else today - timedelta(days=1)
+    # Hoy nunca se incluye en la racha: el día aún no ha terminado y los hábitos
+    # pueden completarse hasta la medianoche. La racha siempre se calcula desde
+    # ayer hacia atrás para evitar que la racha caiga a 0 durante el día.
+    cursor = today - timedelta(days=1)
     for _ in range(MAX_LOOKBACK_DAYS):
         status = _day_status(cursor, habits_by_weekday, non_weekly, status_by_date)
         if status is None:
@@ -2073,7 +2448,8 @@ def compute_user_stats(db: Session, user: models.User) -> schemas.StatsSummary:
     best_streak = 0
     running = 0
     cursor = today - timedelta(days=MAX_LOOKBACK_DAYS)
-    while cursor <= today:
+    # No incluir hoy (el día no ha terminado)
+    while cursor <= today - timedelta(days=1):
         status = _day_status(cursor, habits_by_weekday, non_weekly, status_by_date)
         if status is True:
             running += 1
@@ -2204,6 +2580,405 @@ def by_category(db: Session = Depends(get_db), current_user: models.User = Depen
         for cat, count in sorted(counts.items(), key=lambda kv: -kv[1])
     ]
 
+=== app\routers\timer.py ===
+from datetime import datetime, timezone, timedelta
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session, joinedload
+
+from app import models, schemas
+from app.auth import get_current_user
+from app.database import get_db
+
+router = APIRouter(prefix="/timer", tags=["timer"])
+
+
+@router.get("/sessions", response_model=list[schemas.TimerSessionOut])
+def list_timer_sessions(
+    habit_id: Optional[int] = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    query = (
+        db.query(models.TimerSession)
+        .options(joinedload(models.TimerSession.habit))
+        .filter(models.TimerSession.user_id == current_user.id)
+    )
+
+    if habit_id is not None:
+        query = query.filter(models.TimerSession.habit_id == habit_id)
+
+    sessions = query.order_by(models.TimerSession.start_time.desc()).limit(limit).all()
+    return sessions
+
+
+@router.post("/sessions", response_model=schemas.TimerSessionOut)
+def create_timer_session(
+    payload: schemas.TimerSessionCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    habit = None
+    if payload.habit_id is not None:
+        habit = (
+            db.query(models.Habit)
+            .filter(models.Habit.id == payload.habit_id, models.Habit.user_id == current_user.id)
+            .first()
+        )
+        if not habit:
+            raise HTTPException(status_code=404, detail="Hábito no encontrado.")
+
+    session = models.TimerSession(
+        user_id=current_user.id,
+        habit_id=payload.habit_id,
+        start_time=payload.start_time,
+        end_time=payload.end_time,
+        duration_seconds=payload.duration_seconds,
+        session_type=payload.session_type,
+        notes=payload.notes or "",
+    )
+    db.add(session)
+
+    # Si se solicitó marcar el hábito como completado hoy
+    if payload.auto_mark_done and payload.habit_id is not None:
+        target_date = payload.log_date or payload.start_time.date()
+        log = (
+            db.query(models.HabitLog)
+            .filter(
+                models.HabitLog.habit_id == payload.habit_id,
+                models.HabitLog.date == target_date,
+            )
+            .first()
+        )
+        if log:
+            log.status = "done"
+            log.logged_at = datetime.now(timezone.utc)
+        else:
+            log = models.HabitLog(
+                habit_id=payload.habit_id,
+                user_id=current_user.id,
+                date=target_date,
+                status="done",
+            )
+            db.add(log)
+
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+@router.get("/stats", response_model=schemas.TimerStatsOut)
+def get_timer_stats(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    now_utc = datetime.now(timezone.utc)
+    start_of_today = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+    seven_days_ago = now_utc - timedelta(days=7)
+
+    all_sessions = (
+        db.query(models.TimerSession)
+        .options(joinedload(models.TimerSession.habit))
+        .filter(models.TimerSession.user_id == current_user.id)
+        .all()
+    )
+
+    today_seconds = 0
+    today_sessions_count = 0
+    week_seconds = 0
+    total_seconds = 0
+
+    habit_aggregates: dict[Optional[int], dict] = {}
+
+    for s in all_sessions:
+        dur = s.duration_seconds or 0
+        total_seconds += dur
+
+        st = s.start_time
+        if st.tzinfo is None:
+            st = st.replace(tzinfo=timezone.utc)
+
+        if st >= start_of_today:
+            today_seconds += dur
+            today_sessions_count += 1
+
+        if st >= seven_days_ago:
+            week_seconds += dur
+
+        hid = s.habit_id
+        if hid not in habit_aggregates:
+            hname = s.habit.name if s.habit else "General / Sin asignar"
+            hcat = s.habit.category if s.habit else "otro"
+            habit_aggregates[hid] = {
+                "habit_id": hid,
+                "habit_name": hname,
+                "category": hcat,
+                "total_seconds": 0,
+                "session_count": 0,
+            }
+        habit_aggregates[hid]["total_seconds"] += dur
+        habit_aggregates[hid]["session_count"] += 1
+
+    breakdown = [
+        schemas.HabitTimeStat(**agg)
+        for agg in sorted(habit_aggregates.values(), key=lambda x: x["total_seconds"], reverse=True)
+    ]
+
+    return schemas.TimerStatsOut(
+        today_seconds=today_seconds,
+        week_seconds=week_seconds,
+        total_seconds=total_seconds,
+        today_sessions_count=today_sessions_count,
+        habits_breakdown=breakdown,
+    )
+
+
+@router.delete("/sessions/{session_id}", status_code=204)
+def delete_timer_session(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    session = (
+        db.query(models.TimerSession)
+        .filter(models.TimerSession.id == session_id, models.TimerSession.user_id == current_user.id)
+        .first()
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada.")
+
+    db.delete(session)
+    db.commit()
+    return None
+
+
+=== app\routers\wildcards.py ===
+"""
+Router de comodines (wildcards).
+
+Reglas de negocio:
+  - Saldo máximo: 2 comodines.
+  - Se gana 1 comodín al alcanzar cada múltiplo de 15 días de racha
+    (15, 30, 45 …) siempre que el saldo no sea 2.
+  - Usar un comodín protege la racha marcando todos los hábitos del día
+    como "skipped" (neutral). El saldo baja 1.
+  - No se pueden usar dos comodines en días consecutivos.
+  - Endpoint POST /wildcards/check-milestone: el frontend lo llama al
+    registrar hábitos; si la racha acaba de cruzar un múltiplo de 15
+    otorga el comodín y devuelve ganado=True (para mostrar la notificación).
+"""
+
+from datetime import date as date_type, datetime, timedelta, timezone
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from app import models, schemas
+from app.auth import get_current_user
+from app.database import get_db
+from app.routers.stats import compute_user_stats   # reutiliza el cálculo de racha
+
+MAX_BALANCE = 2
+MILESTONE_INTERVAL = 15  # días
+
+router = APIRouter(prefix="/wildcards", tags=["wildcards"])
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _get_or_create_balance(db: Session, user_id: int) -> models.WildcardBalance:
+    """Devuelve (o crea) el registro de saldo del usuario."""
+    wb = (
+        db.query(models.WildcardBalance)
+        .filter(models.WildcardBalance.user_id == user_id)
+        .first()
+    )
+    if not wb:
+        wb = models.WildcardBalance(user_id=user_id, balance=0, last_milestone=0)
+        db.add(wb)
+        db.flush()   # obtiene el id sin commit completo
+    return wb
+
+
+def _build_status(wb: models.WildcardBalance, current_streak: int) -> schemas.WildcardStatus:
+    """Construye el schema de respuesta a partir del modelo y la racha actual."""
+    today = date_type.today()
+    yesterday = today - timedelta(days=1)
+
+    # El siguiente hito es el próximo múltiplo de 15 que aún no se ha otorgado.
+    next_milestone = wb.last_milestone + MILESTONE_INTERVAL
+
+    # No se puede usar si el último uso fue ayer (regla anti-consecutivo).
+    can_use_today = not (wb.last_used_date == yesterday)
+
+    return schemas.WildcardStatus(
+        balance=wb.balance,
+        last_milestone=wb.last_milestone,
+        last_used_date=wb.last_used_date,
+        max_balance=MAX_BALANCE,
+        next_milestone=next_milestone,
+        can_use_today=can_use_today,
+        at_cap=(wb.balance >= MAX_BALANCE),
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Endpoints
+# ──────────────────────────────────────────────────────────────────────────────
+
+@router.get("", response_model=schemas.WildcardStatus)
+def get_wildcard_status(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Devuelve el estado actual de comodines del usuario.
+    En la primera carga (last_milestone == 0 y balance == 0) sincroniza
+    last_milestone con la racha existente para no mostrar "día 1 de 15"
+    a usuarios que ya llevan días de racha. No otorga comodines
+    retroactivos: solo pone el contador al día.
+    """
+    wb = _get_or_create_balance(db, current_user.id)
+    stats = compute_user_stats(db, current_user)
+    streak = stats.current_streak
+
+    # ── Sincronización inicial ──────────────────────────────────────────────
+    # Si el registro acaba de crearse (last_milestone == 0) y el usuario ya
+    # tiene racha, alineamos last_milestone al múltiplo de 15 más alto ya
+    # superado, sin otorgar comodines por esos hitos pasados.
+    if wb.last_milestone == 0 and streak > 0:
+        # Mayor múltiplo de 15 ya alcanzado (puede ser 0 si streak < 15)
+        highest_completed = (streak // MILESTONE_INTERVAL) * MILESTONE_INTERVAL
+        if highest_completed > 0:
+            wb.last_milestone = highest_completed
+            wb.updated_at = datetime.now(timezone.utc)
+
+    db.commit()
+    return _build_status(wb, streak)
+
+
+@router.post("/check-milestone", response_model=schemas.WildcardStatus)
+def check_milestone(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Evalúa si la racha actual ha cruzado un nuevo múltiplo de 15 días.
+    Si es así, y el saldo no está al tope, otorga 1 comodín.
+    Llámalo después de cada registro de hábito (el frontend lo decide).
+    El campo `gained` no está en el schema de respuesta pero se puede
+    inferir comparando `last_milestone` antes y después; si necesitas
+    saber si se ganó uno, compara el balance retornado.
+    """
+    wb = _get_or_create_balance(db, current_user.id)
+    stats = compute_user_stats(db, current_user)
+    streak = stats.current_streak
+
+    # ¿La racha actual supera el siguiente hito no otorgado?
+    next_milestone = wb.last_milestone + MILESTONE_INTERVAL
+    if streak >= next_milestone:
+        if wb.balance < MAX_BALANCE:
+            wb.balance += 1
+        # Siempre avanzamos el hito aunque estemos al tope (para no regalarlo
+        # en cuanto el usuario gaste un comodín).
+        wb.last_milestone = next_milestone
+        wb.updated_at = datetime.now(timezone.utc)
+
+    db.commit()
+    db.refresh(wb)
+    return _build_status(wb, streak)
+
+
+@router.post("/use", response_model=schemas.WildcardStatus)
+def use_wildcard(
+    payload: schemas.WildcardUseRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Usa 1 comodín para la fecha indicada.
+    Marca como 'skipped' todos los hábitos del usuario que estaban
+    pendientes (sin log o con 'failed') en esa fecha.
+    Reglas de rechazo:
+      - Saldo == 0.
+      - Se usó un comodín ayer (no se pueden usar dos días consecutivos).
+      - La fecha está en el futuro.
+      - La fecha es anterior a hace 7 días (ventana de uso razonable).
+    """
+    today = date_type.today()
+    yesterday = today - timedelta(days=1)
+
+    # ── Validaciones de fecha ───────────────────────────────────────────────
+    if payload.date > today:
+        raise HTTPException(status_code=400, detail="No puedes usar un comodín en una fecha futura.")
+    if payload.date < today - timedelta(days=7):
+        raise HTTPException(
+            status_code=400,
+            detail="Solo puedes usar un comodín para los últimos 7 días.",
+        )
+
+    wb = _get_or_create_balance(db, current_user.id)
+
+    # ── Validaciones de saldo / regla anti-consecutivo ─────────────────────
+    if wb.balance <= 0:
+        raise HTTPException(status_code=400, detail="No tienes comodines disponibles.")
+    if wb.last_used_date == yesterday:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No puedes usar dos comodines en días consecutivos. "
+                "Debes completar tus hábitos hoy para mantener la racha."
+            ),
+        )
+
+    # ── Aplicar comodín: marcar hábitos pendientes como 'skipped' ──────────
+    habits = (
+        db.query(models.Habit)
+        .filter(models.Habit.user_id == current_user.id, models.Habit.is_active.is_(True))
+        .all()
+    )
+
+    for habit in habits:
+        existing_log = (
+            db.query(models.HabitLog)
+            .filter(
+                models.HabitLog.habit_id == habit.id,
+                models.HabitLog.date == payload.date,
+            )
+            .first()
+        )
+        if existing_log:
+            # Solo sobreescribir si no está 'done' — no quitamos logros ya marcados.
+            if existing_log.status != "done":
+                existing_log.status = "skipped"
+                existing_log.logged_at = datetime.now(timezone.utc)
+        else:
+            # Crear log 'skipped' para hábitos sin registro ese día.
+            new_log = models.HabitLog(
+                habit_id=habit.id,
+                user_id=current_user.id,
+                date=payload.date,
+                status="skipped",
+                note="🃏 Comodín usado",
+            )
+            db.add(new_log)
+
+    # ── Actualizar saldo ────────────────────────────────────────────────────
+    wb.balance -= 1
+    wb.last_used_date = payload.date
+    wb.updated_at = datetime.now(timezone.utc)
+
+    db.commit()
+    db.refresh(wb)
+
+    stats = compute_user_stats(db, current_user)
+    return _build_status(wb, stats.current_streak)
+
+
 === app\schemas.py ===
 from datetime import date, datetime
 from typing import Optional
@@ -2298,6 +3073,8 @@ class LogCreate(BaseModel):
     habit_id: int
     date: date
     status: str = "done"
+    mood: Optional[str] = Field(default=None, max_length=20)
+    note: Optional[str] = Field(default="", max_length=500)
 
     @field_validator("status")
     @classmethod
@@ -2312,6 +3089,8 @@ class LogOut(BaseModel):
     habit_id: int
     date: date
     status: str
+    mood: Optional[str] = None
+    note: Optional[str] = ""
     logged_at: datetime
 
     class Config:
@@ -2374,6 +3153,77 @@ class FriendStatsOut(BaseModel):
     current_streak: int
     week_completion_rate: int
     total_completed: int
+
+
+# ---------- Timer ----------
+
+class TimerHabitInfo(BaseModel):
+    id: int
+    name: str
+    category: str
+
+    class Config:
+        from_attributes = True
+
+
+class TimerSessionCreate(BaseModel):
+    habit_id: Optional[int] = None
+    start_time: datetime
+    end_time: datetime
+    duration_seconds: int = Field(ge=1)
+    session_type: str = Field(default="pomodoro", max_length=30)
+    notes: Optional[str] = Field(default="", max_length=500)
+    auto_mark_done: bool = False
+    log_date: Optional[date] = None
+
+
+class TimerSessionOut(BaseModel):
+    id: int
+    user_id: int
+    habit_id: Optional[int] = None
+    habit: Optional[TimerHabitInfo] = None
+    start_time: datetime
+    end_time: datetime
+    duration_seconds: int
+    session_type: str
+    notes: Optional[str] = ""
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class HabitTimeStat(BaseModel):
+    habit_id: Optional[int] = None
+    habit_name: str
+    category: str
+    total_seconds: int
+    session_count: int
+
+
+class TimerStatsOut(BaseModel):
+    today_seconds: int
+    week_seconds: int
+    total_seconds: int
+    today_sessions_count: int
+    habits_breakdown: list[HabitTimeStat]
+
+
+
+# ---------- Wildcards (comodines) ----------
+
+class WildcardStatus(BaseModel):
+    balance: int                          # 0, 1 o 2
+    last_milestone: int                   # último múltiplo de 15 ya otorgado
+    last_used_date: Optional[date] = None # cuándo se usó el último comodín
+    max_balance: int = 2                  # tope inmutable (informativo para UI)
+    next_milestone: int                   # próxima racha en la que se ganará uno
+    can_use_today: bool                   # False si se usó uno ayer (anti-consecutivo)
+    at_cap: bool                          # True si balance == 2
+
+
+class WildcardUseRequest(BaseModel):
+    date: date                            # fecha para la que se activa el comodín
 
 
 === frontend\index.html ===
@@ -2508,6 +3358,7 @@ import Friends from "./pages/Friends";
 import Journal from "./pages/Journal";
 import Coach from "./pages/Coach";
 import Profile from "./pages/Profile";
+import Timer from "./pages/Timer";
 
 function FullScreenLoader() {
   return (
@@ -2608,6 +3459,14 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/timer"
+        element={
+          <ProtectedRoute>
+            <Timer />
+          </ProtectedRoute>
+        }
+      />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
@@ -2626,10 +3485,11 @@ export default function App() {
 
 === frontend\src\components\AccountModal.jsx ===
 import { useState } from "react";
-import { Trash2, LogOut } from "lucide-react";
+import { Trash2, LogOut, Download } from "lucide-react";
 import Modal from "./Modal";
 import ConfirmDialog from "./ConfirmDialog";
 import { useAuth } from "../context/AuthContext";
+import api from "../api/client";
 
 export default function AccountModal({ open, onClose }) {
   const { user, logout, updateProfile, changePassword, deleteAccount } = useAuth();
@@ -2648,6 +3508,27 @@ export default function AccountModal({ open, onClose }) {
   const [savingPassword, setSavingPassword] = useState(false);
 
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
+
+  const handleExport = async () => {
+    setExporting(true);
+    setExportError("");
+    try {
+      const res = await api.get("/profile/export", { responseType: "blob" });
+      const today = new Date().toISOString().slice(0, 10);
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `rutina_export_${today}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setExportError("No se pudo generar la exportación. Intenta de nuevo.");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const inputClass =
     "w-full rounded-lg border border-line bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-signal";
@@ -2842,6 +3723,32 @@ export default function AccountModal({ open, onClose }) {
 
           <div className="border-t border-line" />
 
+          {/* Tus datos */}
+          <div className="flex flex-col gap-2">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
+              Tus datos
+            </h4>
+            <p className="text-xs text-ink-faint">
+              Descarga todos tus hábitos, historial, sesiones, diario y perfil en un ZIP con archivos CSV listos para Excel o Google Sheets.
+            </p>
+            {exportError && (
+              <p className="rounded-lg bg-coral-soft px-3 py-2 text-sm text-coral">
+                {exportError}
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={handleExport}
+              disabled={exporting}
+              className="flex w-fit items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-xs font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-50 cursor-pointer"
+            >
+              <Download size={13} />
+              {exporting ? "Preparando descarga…" : "Descargar todos mis datos (.ZIP)"}
+            </button>
+          </div>
+
+          <div className="border-t border-line" />
+
           {/* Zona de peligro */}
           <div className="flex flex-col gap-2">
             <h4 className="text-xs font-semibold uppercase tracking-wide text-coral">
@@ -2878,43 +3785,49 @@ export default function AccountModal({ open, onClose }) {
 
 === frontend\src\components\AIChat.jsx ===
 import { useEffect, useRef, useState } from "react";
-import { Send, Sparkles, Bot, User, Trash2 } from "lucide-react";
+import {
+  Send, Sparkles, Bot, User, Trash2, BookOpen, ChevronDown,
+  ChevronUp, CheckSquare, Square, ArrowDown,
+} from "lucide-react";
 import api from "../api/client";
 
-const SESSION_KEY = "rutina_chat_history";
+const SESSION_KEY           = "rutina_chat_history";
+const DIARY_TOGGLE_KEY      = "rutina_chat_include_diary";
+const HABIT_NOTES_TOGGLE_KEY= "rutina_chat_include_habit_notes";
+const EXCLUDED_ENTRIES_KEY  = "rutina_chat_excluded_entries";
 
 function loadHistory() {
   try {
     const raw = sessionStorage.getItem(SESSION_KEY);
     return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
+  } catch { return []; }
 }
-
-function saveHistory(history) {
+function saveHistory(h) {
+  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(h)); } catch {}
+}
+function formatDateShort(dateStr) {
   try {
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify(history));
-  } catch {
-    // sessionStorage lleno o no disponible — ignorar
-  }
+    const [y, m, d] = dateStr.split("-");
+    return new Date(+y, +m - 1, +d).toLocaleDateString("es", { day: "numeric", month: "short" });
+  } catch { return dateStr; }
 }
 
+// ── Burbuja de mensaje ────────────────────────────────────────────────────────
 function Message({ role, content }) {
   const isUser = role === "user";
   return (
-    <div className={`flex gap-2.5 ${isUser ? "flex-row-reverse" : ""}`}>
+    <div className={`flex gap-3 ${isUser ? "flex-row-reverse" : ""}`}>
       <div className={[
-        "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs",
+        "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs mt-0.5",
         isUser ? "bg-ink text-bg" : "bg-violet-soft text-violet",
       ].join(" ")}>
         {isUser ? <User size={13} /> : <Bot size={13} />}
       </div>
       <div className={[
-        "max-w-[80%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed",
+        "max-w-[78%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap",
         isUser
           ? "rounded-tr-sm bg-ink text-bg"
-          : "rounded-tl-sm bg-panel border border-line text-ink",
+          : "rounded-tl-sm bg-panel-alt border border-line text-ink",
       ].join(" ")}>
         {content}
       </div>
@@ -2924,18 +3837,15 @@ function Message({ role, content }) {
 
 function TypingIndicator() {
   return (
-    <div className="flex gap-2.5">
-      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-violet-soft text-violet">
+    <div className="flex gap-3">
+      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-violet-soft text-violet mt-0.5">
         <Bot size={13} />
       </div>
-      <div className="rounded-2xl rounded-tl-sm border border-line bg-panel px-4 py-3">
+      <div className="rounded-2xl rounded-tl-sm border border-line bg-panel-alt px-4 py-3">
         <div className="flex gap-1">
           {[0, 1, 2].map((i) => (
-            <span
-              key={i}
-              className="h-1.5 w-1.5 rounded-full bg-ink-faint animate-bounce"
-              style={{ animationDelay: `${i * 0.15}s` }}
-            />
+            <span key={i} className="h-1.5 w-1.5 rounded-full bg-ink-faint animate-bounce"
+              style={{ animationDelay: `${i * 0.15}s` }} />
           ))}
         </div>
       </div>
@@ -2944,33 +3854,95 @@ function TypingIndicator() {
 }
 
 const SUGGESTIONS = [
-  "¿Por qué siento que no soy productivo últimamente?",
   "¿Qué patrón ves en mis hábitos esta semana?",
+  "¿Por qué siento que no soy productivo?",
   "¿Qué me recomiendas mejorar?",
   "¿Cómo puedo mantener la racha?",
 ];
 
+// ── Componente principal ──────────────────────────────────────────────────────
 export default function AIChat() {
-  const [history, setHistory] = useState(() => loadHistory());
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const bottomRef = useRef(null);
+  const [history, setHistory]   = useState(() => loadHistory());
+  const [input, setInput]       = useState("");
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState("");
+  const [atBottom, setAtBottom] = useState(true);
+  const bottomRef   = useRef(null);
+  const scrollRef   = useRef(null);
+  const textareaRef = useRef(null);
 
-  // Persistir historial en sessionStorage cada vez que cambia
+  const [includeDiary, setIncludeDiary] = useState(() => {
+    const s = localStorage.getItem(DIARY_TOGGLE_KEY);
+    return s !== null ? JSON.parse(s) : true;
+  });
+  const [includeHabitNotes, setIncludeHabitNotes] = useState(() => {
+    const s = localStorage.getItem(HABIT_NOTES_TOGGLE_KEY);
+    return s !== null ? JSON.parse(s) : true;
+  });
+  const [availableEntries, setAvailableEntries]   = useState([]);
+  const [selectedEntryIds, setSelectedEntryIds]   = useState(new Set());
+  const [isPanelOpen, setIsPanelOpen]             = useState(false);
+  const [loadedEntries, setLoadedEntries]         = useState(false);
+
+  // Cargar entradas del diario
   useEffect(() => {
-    saveHistory(history);
-  }, [history]);
+    api.get("/journal").then((res) => {
+      const entries = res.data?.entries || [];
+      setAvailableEntries(entries);
+      let excluded = new Set();
+      try {
+        const raw = localStorage.getItem(EXCLUDED_ENTRIES_KEY);
+        if (raw) excluded = new Set(JSON.parse(raw));
+      } catch {}
+      setSelectedEntryIds(new Set(entries.filter((e) => !excluded.has(e.id)).map((e) => e.id)));
+      setLoadedEntries(true);
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [history, loading]);
+    localStorage.setItem(DIARY_TOGGLE_KEY, JSON.stringify(includeDiary));
+  }, [includeDiary]);
+  useEffect(() => {
+    localStorage.setItem(HABIT_NOTES_TOGGLE_KEY, JSON.stringify(includeHabitNotes));
+  }, [includeHabitNotes]);
+  useEffect(() => { saveHistory(history); }, [history]);
+
+  // Auto-scroll al fondo cuando llegan mensajes nuevos
+  useEffect(() => {
+    if (atBottom) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [history, loading, atBottom]);
+
+  // Detectar si el usuario está al fondo del scroll
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 60);
+  };
+
+  // Auto-resize del textarea
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
+  }, [input]);
+
+  const toggleEntry = (id) => {
+    setSelectedEntryIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      const excluded = availableEntries.filter((e) => !next.has(e.id)).map((e) => e.id);
+      localStorage.setItem(EXCLUDED_ENTRIES_KEY, JSON.stringify(excluded));
+      return next;
+    });
+  };
 
   const send = async (message) => {
-    const text = message || input.trim();
+    const text = (message || input).trim();
     if (!text || loading) return;
     setInput("");
     setError("");
+    setAtBottom(true);
 
     const newHistory = [...history, { role: "user", content: text }];
     setHistory(newHistory);
@@ -2979,31 +3951,49 @@ export default function AIChat() {
     try {
       const res = await api.post("/journal/chat", {
         message: text,
-        history: history, // historial previo (sin el mensaje actual)
+        history,
+        include_diary: includeDiary,
+        selected_entry_ids: includeDiary && loadedEntries ? Array.from(selectedEntryIds) : null,
+        include_habit_notes: includeHabitNotes,
       });
       setHistory([...newHistory, { role: "assistant", content: res.data.reply }]);
     } catch (err) {
       setError(err?.response?.data?.detail || "La IA no está disponible. Intenta de nuevo.");
-      // Quitar el mensaje del usuario si falló
       setHistory(history);
     } finally {
       setLoading(false);
     }
   };
 
+  const handleKey = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+  };
+
   const isEmpty = history.length === 0;
 
   return (
-    <div className="flex flex-col h-[520px] rounded-2xl border border-line bg-bg overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center gap-2 border-b border-line bg-panel px-4 py-3">
-        <div className="flex h-7 w-7 items-center justify-center rounded-full bg-violet-soft text-violet">
-          <Sparkles size={14} />
-        </div>
-        <div className="flex-1">
-          <p className="text-sm font-semibold text-ink">Coach IA</p>
-          <p className="text-xs text-ink-faint">Basado en tu diario de los últimos 7 días</p>
-        </div>
+    // Ocupa todo el espacio que el padre (main en AppShell) le da
+    <div className="flex flex-1 flex-col overflow-hidden">
+
+      {/* ── Topbar del chat ── */}
+      <div className="shrink-0 flex items-center gap-2 border-b border-line bg-panel px-4 py-2.5">
+        <p className="flex-1 text-sm font-semibold text-ink">Coach IA</p>
+
+        {/* Botón de configuración / notas */}
+        <button
+          onClick={() => setIsPanelOpen((o) => !o)}
+          className={[
+            "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer border",
+            isPanelOpen
+              ? "bg-panel-alt border-line text-ink"
+              : "border-transparent text-ink-soft hover:bg-panel-alt hover:text-ink",
+          ].join(" ")}
+        >
+          <BookOpen size={13} className={includeDiary ? "text-violet" : "text-ink-faint"} />
+          Notas
+          {isPanelOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+        </button>
+
         {history.length > 0 && (
           <button
             onClick={() => { setHistory([]); sessionStorage.removeItem(SESSION_KEY); }}
@@ -3015,26 +4005,94 @@ export default function AIChat() {
         )}
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
+      {/* ── Panel de configuración de notas (colapsable) ── */}
+      {isPanelOpen && (
+        <div className="shrink-0 border-b border-line bg-panel-alt/70 px-4 py-3 text-xs flex flex-col gap-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <label className="flex items-center gap-2 cursor-pointer select-none font-medium text-ink">
+              <input type="checkbox" checked={includeDiary}
+                onChange={(e) => setIncludeDiary(e.target.checked)}
+                className="rounded border-line text-violet focus:ring-violet" />
+              Compartir contexto de mi diario
+            </label>
+            {includeDiary && availableEntries.length > 0 && (
+              <div className="flex items-center gap-2">
+                <button onClick={() => setSelectedEntryIds(new Set(availableEntries.map((e) => e.id)))}
+                  className="text-[11px] text-violet hover:underline cursor-pointer">
+                  Marcar todas
+                </button>
+                <span className="text-line">·</span>
+                <button onClick={() => { setSelectedEntryIds(new Set()); localStorage.setItem(EXCLUDED_ENTRIES_KEY, JSON.stringify(availableEntries.map((e) => e.id))); }}
+                  className="text-[11px] text-ink-faint hover:text-coral hover:underline cursor-pointer">
+                  Desmarcar todas
+                </button>
+              </div>
+            )}
+          </div>
+
+          {includeDiary && (
+            availableEntries.length > 0 ? (
+              <div className="max-h-32 overflow-y-auto rounded-xl border border-line bg-panel p-2 flex flex-col gap-1">
+                {availableEntries.map((entry) => {
+                  const checked = selectedEntryIds.has(entry.id);
+                  return (
+                    <div key={entry.id} onClick={() => toggleEntry(entry.id)}
+                      className={[
+                        "flex items-start gap-2 rounded-lg p-1.5 cursor-pointer select-none transition-colors",
+                        checked ? "hover:bg-violet-soft/20" : "opacity-60 hover:opacity-100 hover:bg-panel-alt",
+                      ].join(" ")}>
+                      <span className="mt-0.5 shrink-0 text-violet">
+                        {checked ? <CheckSquare size={13} /> : <Square size={13} className="text-ink-faint" />}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <span className="font-mono text-[11px] font-semibold text-ink">
+                          {formatDateShort(entry.entry_date)}
+                        </span>
+                        <p className="line-clamp-1 text-[11px] text-ink-soft">{entry.content}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-[11px] text-ink-faint italic">Aún no tienes notas en tu diario.</p>
+            )
+          )}
+
+          <div className="border-t border-line/60 pt-2 flex items-center justify-between">
+            <label className="flex items-center gap-2 cursor-pointer select-none font-medium text-ink">
+              <input type="checkbox" checked={includeHabitNotes}
+                onChange={(e) => setIncludeHabitNotes(e.target.checked)}
+                className="rounded border-line text-signal focus:ring-signal" />
+              Compartir notas y estados de ánimo de mis hábitos
+            </label>
+          </div>
+        </div>
+      )}
+
+      {/* ── Área de mensajes (scroll interno) ── */}
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto px-4 py-5 pb-20 md:pb-5 flex flex-col gap-4"
+      >
         {isEmpty && (
-          <div className="flex flex-col items-center gap-4 py-6 text-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-violet-soft text-violet">
-              <Sparkles size={22} />
+          <div className="flex flex-col items-center gap-4 py-10 text-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-violet-soft text-violet">
+              <Sparkles size={26} />
             </div>
             <div>
-              <p className="text-sm font-medium text-ink">Hola, soy tu coach personal</p>
-              <p className="text-xs text-ink-soft mt-1 max-w-xs">
-                Conozco tu diario reciente. Pregúntame lo que quieras sobre tus hábitos y productividad.
+              <p className="text-base font-semibold text-ink">Hola, soy tu coach personal</p>
+              <p className="mt-1 text-sm text-ink-soft max-w-xs mx-auto">
+                {includeDiary && selectedEntryIds.size > 0
+                  ? "Conozco tus hábitos y las notas que elegiste. Pregúntame lo que quieras."
+                  : "Listo para ayudarte con tus hábitos y productividad."}
               </p>
             </div>
-            <div className="flex flex-wrap gap-2 justify-center mt-1">
+            <div className="flex flex-wrap gap-2 justify-center mt-2">
               {SUGGESTIONS.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => send(s)}
-                  className="rounded-full border border-line bg-panel px-3 py-1.5 text-xs text-ink-soft hover:border-violet hover:text-violet transition-colors cursor-pointer"
-                >
+                <button key={s} onClick={() => send(s)}
+                  className="rounded-full border border-line bg-panel px-3 py-1.5 text-xs text-ink-soft hover:border-violet hover:text-violet transition-colors cursor-pointer">
                   {s}
                 </button>
               ))}
@@ -3042,37 +4100,44 @@ export default function AIChat() {
           </div>
         )}
 
-        {history.map((msg, i) => (
-          <Message key={i} role={msg.role} content={msg.content} />
-        ))}
-
+        {history.map((msg, i) => <Message key={i} role={msg.role} content={msg.content} />)}
         {loading && <TypingIndicator />}
-
         {error && (
-          <p className="rounded-lg bg-coral-soft px-3 py-2 text-xs text-coral text-center">{error}</p>
+          <p className="rounded-xl bg-coral-soft px-4 py-2.5 text-sm text-coral text-center">{error}</p>
         )}
-
         <div ref={bottomRef} />
       </div>
 
-      {/* Input */}
-      <div className="border-t border-line bg-panel p-3">
-        <div className="flex gap-2">
-          <input
-            type="text"
+      {/* Botón "bajar al fondo" */}
+      {!atBottom && (
+        <button
+          onClick={() => { setAtBottom(true); bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }}
+          className="absolute bottom-20 right-6 flex h-8 w-8 items-center justify-center rounded-full border border-line bg-panel shadow-md text-ink-soft hover:text-ink transition-colors cursor-pointer"
+        >
+          <ArrowDown size={15} />
+        </button>
+      )}
+
+      {/* ── Input pegado al fondo ── */}
+      <div className="shrink-0 bg-panel px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] fixed bottom-14 inset-x-0 z-10 border-t border-line md:static md:bottom-auto md:z-auto md:border-t-0">
+        <div className="mx-auto flex max-w-2xl items-end gap-2">
+          <textarea
+            ref={textareaRef}
+            rows={1}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-            placeholder="Escribe tu pregunta…"
+            onKeyDown={handleKey}
+            placeholder="Escribe tu pregunta… (Enter para enviar)"
             maxLength={1000}
-            className="flex-1 rounded-lg border border-line bg-bg px-3 py-2 text-sm outline-none focus:border-signal"
+            className="flex-1 resize-none overflow-hidden rounded-2xl border border-line bg-bg px-4 py-2.5 text-sm text-ink outline-none focus:border-signal placeholder:text-ink-faint leading-relaxed"
+            style={{ minHeight: "42px" }}
           />
           <button
             onClick={() => send()}
             disabled={!input.trim() || loading}
-            className="flex h-9 w-9 items-center justify-center rounded-lg bg-ink text-bg transition-opacity hover:opacity-80 disabled:opacity-40 cursor-pointer"
+            className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-2xl bg-ink text-bg transition-opacity hover:opacity-80 disabled:opacity-35 cursor-pointer"
           >
-            <Send size={15} />
+            <Send size={16} />
           </button>
         </div>
       </div>
@@ -3087,6 +4152,7 @@ import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutGrid, ListChecks, BarChart3, LogOut, CheckCircle2,
   UserRound, Users, BookOpen, Sparkles, UserCircle, MoreHorizontal, X,
+  Timer,
 } from "lucide-react";
 import ThemeToggle from "./ThemeToggle";
 import NotificationToggle from "./NotificationToggle";
@@ -3106,6 +4172,7 @@ const PRIMARY_NAV = [
 
 // Items secundarios en el drawer "más"
 const SECONDARY_NAV = [
+  { to: "/timer", label: "Timer", icon: Timer },
   { to: "/estadisticas", label: "Estadísticas", icon: BarChart3 },
   { to: "/amigos", label: "Amigos", icon: Users },
   { to: "/perfil-ia", label: "Mi perfil IA", icon: UserCircle },
@@ -3228,7 +4295,12 @@ export default function AppShell({ children }) {
             </div>
           </header>
 
-          <main className="flex-1 px-5 pb-24 pt-4 md:px-8 md:pb-10 md:pt-6">
+          <main className={[
+            "flex-1",
+            location.pathname === "/coach"
+              ? "flex flex-col overflow-hidden"
+              : "px-5 pb-24 pt-4 md:px-8 md:pb-10 md:pt-6",
+          ].join(" ")}>
             {children}
           </main>
 
@@ -4347,6 +5419,145 @@ export default function HabitForm({ initial, onSubmit, onCancel, submitLabel = "
 }
 
 
+=== frontend\src\components\HabitMoodModal.jsx ===
+import { useState, useEffect } from "react";
+import { Check, X, Sparkles } from "lucide-react";
+
+export const MOOD_OPTIONS = [
+  { key: "great", emoji: "🤩", label: "Genial" },
+  { key: "good", emoji: "😊", label: "Bien" },
+  { key: "neutral", emoji: "😐", label: "Normal" },
+  { key: "tired", emoji: "🥱", label: "Cansado" },
+  { key: "hard", emoji: "😫", label: "Difícil" },
+];
+
+export function getMoodInfo(moodKey) {
+  return MOOD_OPTIONS.find((m) => m.key === moodKey) || null;
+}
+
+export default function HabitMoodModal({
+  isOpen,
+  habit,
+  initialMood = null,
+  initialNote = "",
+  status = "done",
+  onSave,
+  onClose,
+}) {
+  const [selectedMood, setSelectedMood] = useState(initialMood);
+  const [note, setNote] = useState(initialNote);
+
+  useEffect(() => {
+    if (isOpen) {
+      setSelectedMood(initialMood || null);
+      setNote(initialNote || "");
+    }
+  }, [isOpen, initialMood, initialNote]);
+
+  if (!isOpen || !habit) return null;
+
+  const statusLabel =
+    status === "done" ? "¡Hábito hecho!" : status === "skipped" ? "Hábito omitido" : "Hábito no realizado";
+
+  const handleSave = () => {
+    onSave({
+      mood: selectedMood,
+      note: note.trim(),
+    });
+  };
+
+  const handleSkip = () => {
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs animate-in fade-in duration-150">
+      <div className="w-full max-w-sm rounded-2xl border border-line bg-panel p-5 shadow-xl animate-in zoom-in-95 duration-150">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <span className="inline-block rounded-full bg-signal-soft px-2.5 py-0.5 text-[11px] font-semibold text-signal">
+              {statusLabel}
+            </span>
+            <h3 className="mt-1.5 font-semibold text-ink text-base truncate max-w-[240px]">
+              {habit.name}
+            </h3>
+            <p className="text-xs text-ink-soft mt-0.5">
+              ¿Cómo te sentiste al realizarlo?
+            </p>
+          </div>
+          <button
+            onClick={handleSkip}
+            className="rounded-lg p-1 text-ink-faint hover:bg-panel-alt hover:text-ink transition-colors cursor-pointer"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Emojis Selector */}
+        <div className="mt-4 flex justify-between gap-1.5">
+          {MOOD_OPTIONS.map((m) => {
+            const isSelected = selectedMood === m.key;
+            return (
+              <button
+                key={m.key}
+                type="button"
+                onClick={() => setSelectedMood(isSelected ? null : m.key)}
+                className={[
+                  "flex flex-1 flex-col items-center gap-1 rounded-xl p-2 transition-all cursor-pointer border",
+                  isSelected
+                    ? "border-signal bg-signal-soft scale-105 shadow-xs"
+                    : "border-line bg-panel-alt/50 hover:bg-panel-alt hover:border-line",
+                ].join(" ")}
+              >
+                <span className="text-2xl">{m.emoji}</span>
+                <span className="text-[10px] font-medium text-ink-soft truncate">
+                  {m.label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Micro-nota */}
+        <div className="mt-4">
+          <label className="block text-xs font-medium text-ink-soft mb-1">
+            Nota rápida (opcional):
+          </label>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Ej. Me costó arrancar pero me dio energía..."
+            rows={2}
+            maxLength={300}
+            className="w-full rounded-xl border border-line bg-bg p-2.5 text-xs text-ink placeholder:text-ink-faint focus:border-signal focus:outline-none"
+          />
+        </div>
+
+        {/* Acciones */}
+        <div className="mt-5 flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={handleSkip}
+            className="rounded-xl px-3.5 py-2 text-xs font-medium text-ink-soft hover:text-ink transition-colors cursor-pointer"
+          >
+            Saltar
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            className="flex items-center gap-1 rounded-xl bg-ink px-4 py-2 text-xs font-semibold text-bg hover:opacity-90 transition-all cursor-pointer"
+          >
+            <Check size={14} />
+            Guardar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 === frontend\src\components\Modal.jsx ===
 import { useCallback, useEffect, useRef } from "react";
 import { X } from "lucide-react";
@@ -4573,9 +5784,11 @@ export default function ThemeToggle() {
 
 
 === frontend\src\components\TodayChecklist.jsx ===
-import { Check, X, MinusCircle } from "lucide-react";
+import { useState } from "react";
+import { Check, X, MinusCircle, MessageSquare } from "lucide-react";
 import { categoryMeta } from "../lib/categories";
 import { formatTime, toMinutes, todayLocalISODate, habitOccursOnDate } from "../lib/schedule";
+import HabitMoodModal, { getMoodInfo } from "./HabitMoodModal";
 
 const STATUS_CONFIG = {
   done: {
@@ -4602,6 +5815,10 @@ export default function TodayChecklist({ habits, logsByHabitId = {}, onSetStatus
   const resolvedDate = date || todayLocalISODate();
   const isFuture = resolvedDate > todayLocalISODate();
 
+  // Estado para el modal de estado de ánimo
+  const [moodModalHabit, setMoodModalHabit] = useState(null);
+  const [pendingStatus, setPendingStatus] = useState("done");
+
   const todays = habits
     .filter((h) => h.is_active !== false && habitOccursOnDate(h, resolvedDate))
     .sort((a, b) => {
@@ -4612,6 +5829,26 @@ export default function TodayChecklist({ habits, logsByHabitId = {}, onSetStatus
       if (bMin == null) return -1;
       return aMin - bMin;
     });
+
+  const handleButtonClick = (habit, statusKey, isActive) => {
+    if (isActive) {
+      // Si ya estaba activo y se toca de nuevo, se desmarca (vuelve a null)
+      onSetStatus(habit.id, null);
+    } else {
+      // Marcamos el estado en el log inmediatamente
+      onSetStatus(habit.id, statusKey);
+      // Y abrimos el modal rápido de ánimo y nota
+      setPendingStatus(statusKey);
+      setMoodModalHabit(habit);
+    }
+  };
+
+  const handleSaveMood = (data) => {
+    if (moodModalHabit) {
+      onSetStatus(moodModalHabit.id, pendingStatus, data);
+    }
+    setMoodModalHabit(null);
+  };
 
   if (todays.length === 0) {
     return (
@@ -4624,76 +5861,268 @@ export default function TodayChecklist({ habits, logsByHabitId = {}, onSetStatus
   }
 
   return (
-    <ul className="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-panel">
-      {todays.map((habit) => {
-        const meta = categoryMeta(habit.category);
-        const Icon = meta.icon;
-        const currentStatus = logsByHabitId[habit.id]?.status ?? null;
+    <>
+      <ul className="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-panel shadow-xs">
+        {todays.map((habit) => {
+          const meta = categoryMeta(habit.category);
+          const Icon = meta.icon;
+          const log = logsByHabitId[habit.id];
+          const currentStatus = log?.status ?? null;
+          const currentMood = log?.mood ? getMoodInfo(log.mood) : null;
+          const hasNote = Boolean(log?.note && log.note.trim());
 
-        return (
-          <li
-            key={habit.id}
-            className="flex items-center gap-3 px-4 py-3.5"
-          >
-            {/* Category icon */}
-            <span
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
-              style={{ backgroundColor: `var(--${meta.token}-soft)`, color: `var(--${meta.token})` }}
+          return (
+            <li
+              key={habit.id}
+              className="flex items-center gap-3 px-4 py-3.5 hover:bg-panel-alt/30 transition-colors"
             >
-              <Icon size={15} />
-            </span>
+              {/* Category icon */}
+              <span
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+                style={{ backgroundColor: `var(--${meta.token}-soft)`, color: `var(--${meta.token})` }}
+              >
+                <Icon size={15} />
+              </span>
 
-            {/* Name + time */}
-            <div className="min-w-0 flex-1">
-              <p className={[
-                "truncate text-sm font-medium",
-                currentStatus === "done"
-                  ? "text-ink-faint line-through"
-                  : currentStatus === "failed"
-                  ? "text-coral/70 line-through"
-                  : "text-ink",
-              ].join(" ")}>
-                {habit.name}
-              </p>
-              {habit.start_time ? (
-                <p className="font-mono text-xs text-ink-faint tabular">
-                  {formatTime(habit.start_time)} – {formatTime(habit.end_time)}
-                </p>
-              ) : habit.duration_minutes ? (
-                <p className="text-xs text-ink-faint">{habit.duration_minutes} min</p>
-              ) : null}
-            </div>
+              {/* Name + time + micro-nota */}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className={[
+                    "truncate text-sm font-medium",
+                    currentStatus === "done"
+                      ? "text-ink-faint line-through"
+                      : currentStatus === "failed"
+                      ? "text-coral/70 line-through"
+                      : "text-ink",
+                  ].join(" ")}>
+                    {habit.name}
+                  </p>
 
-            {/* Status buttons — ocultos en fechas futuras */}
-            {!isFuture && (
-              <div className="flex shrink-0 gap-1">
-                {Object.entries(STATUS_CONFIG).map(([statusKey, cfg]) => {
-                  const BtnIcon = cfg.icon;
-                  const isActive = currentStatus === statusKey;
-
-                  return (
+                  {/* Chip de Ánimo si ya fue registrado */}
+                  {(currentMood || hasNote) && (
                     <button
-                      key={statusKey}
-                      onClick={() => onSetStatus(habit.id, isActive ? null : statusKey)}
-                      aria-label={cfg.label}
-                      title={cfg.label}
-                      className={[
-                        "flex h-7 w-7 items-center justify-center rounded-full border-2 transition-colors cursor-pointer",
-                        isActive
-                          ? `${cfg.activeClass}`
-                          : `border-line text-transparent ${cfg.hoverClass}`,
-                      ].join(" ")}
+                      type="button"
+                      onClick={() => {
+                        setPendingStatus(currentStatus || "done");
+                        setMoodModalHabit(habit);
+                      }}
+                      title={log?.note || currentMood?.label}
+                      className="inline-flex items-center gap-1 rounded-full bg-panel-alt border border-line px-2 py-0.5 text-[11px] text-ink hover:border-signal transition-colors cursor-pointer"
                     >
-                      <BtnIcon size={13} strokeWidth={2.5} />
+                      {currentMood && <span>{currentMood.emoji}</span>}
+                      {hasNote && <MessageSquare size={11} className="text-signal" />}
+                      <span className="text-[10px] font-medium text-ink-soft truncate max-w-[120px]">
+                        {log?.note || currentMood?.label}
+                      </span>
                     </button>
-                  );
-                })}
+                  )}
+                </div>
+
+                {habit.start_time ? (
+                  <p className="font-mono text-xs text-ink-faint tabular">
+                    {formatTime(habit.start_time)} – {formatTime(habit.end_time)}
+                  </p>
+                ) : habit.duration_minutes ? (
+                  <p className="text-xs text-ink-faint">{habit.duration_minutes} min</p>
+                ) : null}
               </div>
+
+              {/* Status buttons — ocultos en fechas futuras */}
+              {!isFuture && (
+                <div className="flex shrink-0 gap-1">
+                  {Object.entries(STATUS_CONFIG).map(([statusKey, cfg]) => {
+                    const BtnIcon = cfg.icon;
+                    const isActive = currentStatus === statusKey;
+
+                    return (
+                      <button
+                        key={statusKey}
+                        onClick={() => handleButtonClick(habit, statusKey, isActive)}
+                        aria-label={cfg.label}
+                        title={cfg.label}
+                        className={[
+                          "flex h-7 w-7 items-center justify-center rounded-full border-2 transition-colors cursor-pointer",
+                          isActive
+                            ? `${cfg.activeClass}`
+                            : `border-line text-transparent ${cfg.hoverClass}`,
+                        ].join(" ")}
+                      >
+                        <BtnIcon size={13} strokeWidth={2.5} />
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+
+      {/* Modal de Ánimo y Nota */}
+      {moodModalHabit && (
+        <HabitMoodModal
+          isOpen={Boolean(moodModalHabit)}
+          habit={moodModalHabit}
+          status={pendingStatus}
+          initialMood={logsByHabitId[moodModalHabit.id]?.mood || null}
+          initialNote={logsByHabitId[moodModalHabit.id]?.note || ""}
+          onSave={handleSaveMood}
+          onClose={() => setMoodModalHabit(null)}
+        />
+      )}
+    </>
+  );
+}
+
+
+=== frontend\src\components\WildcardWidget.jsx ===
+import { useState } from "react";
+import { Shuffle, AlertTriangle, CheckCircle, Info } from "lucide-react";
+import { todayLocalISODate } from "../lib/schedule";
+
+export default function WildcardWidget({ wildcard, currentStreak = 0, onUse, gained = false }) {
+  const [using, setUsing]           = useState(false);
+  const [useError, setUseError]     = useState("");
+  const [useSuccess, setUseSuccess] = useState(false);
+
+  if (!wildcard) return null;
+
+  const { balance, max_balance, next_milestone, can_use_today, at_cap } = wildcard;
+  const today = todayLocalISODate();
+
+  // Progreso hacia el siguiente comodín
+  const prevMilestone = wildcard.last_milestone;
+  const daysIntoRange = Math.min(Math.max(currentStreak - prevMilestone, 0), 15);
+  const progressPct   = Math.round((daysIntoRange / 15) * 100);
+
+  const canUse = balance > 0 && can_use_today;
+
+  const handleUse = async () => {
+    setUseError("");
+    setUsing(true);
+    try {
+      await onUse(today);
+      setUseSuccess(true);
+      setTimeout(() => setUseSuccess(false), 3000);
+    } catch (err) {
+      setUseError(err?.response?.data?.detail || "No se pudo usar el comodín.");
+    } finally {
+      setUsing(false);
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border border-line bg-panel px-4 py-3 flex flex-col gap-2.5">
+
+      {/* ── Fila principal ── */}
+      <div className="flex items-center gap-3">
+
+        {/* Cartas de saldo */}
+        <div className="flex gap-1 shrink-0">
+          {Array.from({ length: max_balance }).map((_, i) => (
+            <span
+              key={i}
+              title={i < balance ? "Comodín disponible" : "Vacío"}
+              className={[
+                "text-base leading-none transition-all",
+                i < balance ? "opacity-100" : "opacity-25 grayscale",
+              ].join(" ")}
+            >
+              🃏
+            </span>
+          ))}
+        </div>
+
+        {/* Texto y progreso */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-baseline justify-between gap-2">
+            <p className="text-xs font-semibold text-ink leading-none">
+              {balance === 0
+                ? "Sin comodines"
+                : balance === 1
+                ? "1 comodín guardado"
+                : "2 comodines — reserva llena"}
+            </p>
+            {!at_cap && (
+              <span className="text-[10px] text-ink-faint font-mono tabular shrink-0">
+                {daysIntoRange}/15 días
+              </span>
             )}
-          </li>
-        );
-      })}
-    </ul>
+          </div>
+
+          {/* Barra de progreso — solo si no está al tope */}
+          {!at_cap ? (
+            <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-bg border border-line">
+              <div
+                className="h-full rounded-full bg-signal transition-all duration-500"
+                style={{ width: `${progressPct}%` }}
+              />
+            </div>
+          ) : (
+            <p className="mt-0.5 text-[10px] text-signal font-medium">
+              Usa uno antes de ganar el siguiente (día {next_milestone})
+            </p>
+          )}
+        </div>
+
+        {/* Botón compacto */}
+        {useSuccess ? (
+          <span className="flex items-center gap-1 text-xs font-medium text-mint shrink-0">
+            <CheckCircle size={13} /> Activado
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={handleUse}
+            disabled={using || !canUse}
+            title={
+              balance === 0
+                ? "Completa 15 días seguidos para ganar un comodín"
+                : !can_use_today
+                ? "Usaste un comodín ayer — completa tus hábitos hoy"
+                : "Proteger la racha de hoy"
+            }
+            className="flex shrink-0 items-center gap-1.5 rounded-lg bg-signal px-3 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer"
+          >
+            <Shuffle size={12} />
+            {using ? "…" : "Usar"}
+          </button>
+        )}
+      </div>
+
+      {/* Alerta anti-consecutivo */}
+      {balance > 0 && !can_use_today && (
+        <p className="flex items-center gap-1 text-[11px] text-coral">
+          <AlertTriangle size={11} />
+          Usaste un comodín ayer — completa tus hábitos hoy para mantener la racha.
+        </p>
+      )}
+
+      {/* Toast ganado */}
+      {gained && (
+        <p className="text-[11px] font-semibold text-signal">
+          🃏 ¡Ganaste un comodín por llegar a {wildcard.last_milestone} días de racha!
+        </p>
+      )}
+
+      {useError && (
+        <p className="text-[11px] text-coral">{useError}</p>
+      )}
+
+      {/* Ayuda desplegable mínima */}
+      <details className="group">
+        <summary className="cursor-pointer select-none flex items-center gap-1 text-[10px] text-ink-faint hover:text-ink transition-colors list-none">
+          <Info size={10} />
+          Cómo funcionan los comodines
+        </summary>
+        <ul className="mt-1.5 flex flex-col gap-1 text-[11px] text-ink-soft leading-relaxed pl-1">
+          <li>🃏 Ganas 1 cada <strong>15 días de racha</strong> (tope: 2).</li>
+          <li>🛡️ Úsalo si no puedes completar tus hábitos — la racha se mantiene.</li>
+          <li>🚫 No puedes usar dos días <strong>consecutivos</strong>.</li>
+          <li>📦 No expiran al cambiar de mes.</li>
+        </ul>
+      </details>
+    </div>
   );
 }
 
@@ -4998,8 +6427,9 @@ export function useHabits(date) {
    * Set the status for a habit on the target date.
    * status: "done" | "skipped" | "failed"
    * Passing null clears the log entirely (back to "sin registrar").
+   * extra: { mood, note } opcional
    */
-  const setHabitStatus = async (habitId, status) => {
+  const setHabitStatus = async (habitId, status, extra = {}) => {
     if (status === null) {
       // Find the log id and delete it
       const existing = logsByHabitId[habitId];
@@ -5010,15 +6440,20 @@ export function useHabits(date) {
       return;
     }
 
-    const res = await api.post("/logs", {
+    const payload = {
       habit_id: habitId,
       date: targetDate,
       status,
-    });
+      ...(extra.mood !== undefined ? { mood: extra.mood } : {}),
+      ...(extra.note !== undefined ? { note: extra.note } : {}),
+    };
+
+    const res = await api.post("/logs", payload);
     setLogs((prev) => {
       const rest = prev.filter((l) => l.habit_id !== habitId);
       return [...rest, res.data];
     });
+    return res.data;
   };
 
   return {
@@ -5327,6 +6762,74 @@ export function useStats() {
   }, [refresh]);
 
   return { summary, weekly, byCategory, loading, error, refresh };
+}
+
+
+=== frontend\src\hooks\useWildcard.js ===
+import { useCallback, useEffect, useState } from "react";
+import api from "../api/client";
+
+/**
+ * Hook para gestionar el estado de comodines del usuario.
+ *
+ * Expone:
+ *   wildcard     – objeto WildcardStatus del backend (o null si cargando)
+ *   loading      – boolean
+ *   error        – string | null
+ *   refresh()    – recarga el estado desde el servidor
+ *   checkMilestone() – llama a POST /wildcards/check-milestone tras registrar hábitos
+ *   useWildcardForDate(date) – gasta 1 comodín para la fecha indicada (YYYY-MM-DD)
+ *   gained       – true durante 4 s cuando se acaba de ganar un comodín (para toast)
+ */
+export function useWildcard() {
+  const [wildcard, setWildcard] = useState(null);
+  const [loading, setLoading]   = useState(true);
+  const [error, setError]       = useState(null);
+  const [gained, setGained]     = useState(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await api.get("/wildcards");
+      setWildcard(res.data);
+    } catch (err) {
+      setError(err?.response?.data?.detail || "No se pudo cargar los comodines.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  /**
+   * Llama al endpoint de milestone. Si el balance subió, dispara `gained`
+   * para que el componente muestre una notificación de celebración.
+   */
+  const checkMilestone = useCallback(async () => {
+    try {
+      const prevBalance = wildcard?.balance ?? 0;
+      const res = await api.post("/wildcards/check-milestone");
+      setWildcard(res.data);
+      if (res.data.balance > prevBalance) {
+        setGained(true);
+        setTimeout(() => setGained(false), 4000);
+      }
+    } catch {
+      // silencioso — no bloquear al usuario si falla
+    }
+  }, [wildcard]);
+
+  /**
+   * Usa 1 comodín para la fecha dada (formato "YYYY-MM-DD").
+   * Lanza excepción si el backend rechaza (sin saldo, consecutivo, etc.)
+   * para que el componente pueda mostrar el error.
+   */
+  const useWildcardForDate = useCallback(async (date) => {
+    const res = await api.post("/wildcards/use", { date });
+    setWildcard(res.data);
+    return res.data;
+  }, []);
+
+  return { wildcard, loading, error, gained, refresh, checkMilestone, useWildcardForDate };
 }
 
 
@@ -5670,18 +7173,10 @@ createRoot(document.getElementById("root")).render(
 === frontend\src\pages\Coach.jsx ===
 import AIChat from "../components/AIChat";
 
+// Coach ocupa todo el espacio disponible — AppShell le da flex-1 + overflow-hidden
+// cuando la ruta es /coach, así el chat llena la pantalla sin scroll de página.
 export default function Coach() {
-  return (
-    <div className="flex flex-col gap-4 max-w-2xl">
-      <div>
-        <h1 className="text-lg font-semibold">Coach IA</h1>
-        <p className="text-sm text-ink-soft mt-0.5">
-          Tu coach personal conoce tus hábitos y tu diario reciente. Pregúntale lo que quieras.
-        </p>
-      </div>
-      <AIChat />
-    </div>
-  );
+  return <AIChat />;
 }
 
 
@@ -5690,20 +7185,26 @@ import { useState } from "react";
 import CurrentFocusCard from "../components/CurrentFocusCard";
 import TodayChecklist from "../components/TodayChecklist";
 import StatCard from "../components/StatCard";
+import WildcardWidget from "../components/WildcardWidget";
 import DateNavBar from "../components/DateNavBar";
 import { useHabits } from "../hooks/useHabits";
 import { useStats } from "../hooks/useStats";
+import { useWildcard } from "../hooks/useWildcard";
 import { todayLocalISODate, toLocalISODate, habitOccursOnDate } from "../lib/schedule";
 
 export default function Dashboard() {
   const [selectedDate, setSelectedDate] = useState(todayLocalISODate());
   const { habits: allHabits, completedHabitIds, logsByHabitId, loading, error, setHabitStatus, refresh: refreshHabits } = useHabits(selectedDate);
   const { summary, refresh: refreshStats } = useStats();
+  const { wildcard, gained, checkMilestone, useWildcardForDate, refresh: refreshWildcard } = useWildcard();
 
   // Wrapper que actualiza el estado del hábito y luego refresca las stats
-  const handleSetStatus = async (habitId, status) => {
-    await setHabitStatus(habitId, status);
+  const handleSetStatus = async (habitId, status, extra = {}) => {
+    const res = await setHabitStatus(habitId, status, extra);
     refreshStats();
+    // Verifica si se alcanzó un nuevo hito de 15 días al marcar un hábito como hecho
+    if (status === "done") checkMilestone();
+    return res;
   };
 
   // Excluir hábitos que no existían en la fecha seleccionada.
@@ -5771,6 +7272,20 @@ export default function Dashboard() {
               accent="violet"
             />
           </div>
+
+          {/* Comodines — solo visibles en vista de hoy */}
+          {isToday && (
+            <WildcardWidget
+              wildcard={wildcard}
+              currentStreak={summary ? summary.current_streak : 0}
+              gained={gained}
+              onUse={async (date) => {
+                await useWildcardForDate(date);
+                refreshHabits();
+                refreshStats();
+              }}
+            />
+          )}
 
           <div>
             <h2 className="mb-3 text-sm font-semibold text-ink-soft">
@@ -6506,8 +8021,9 @@ export default function Login() {
 
 === frontend\src\pages\Profile.jsx ===
 import { useState, useEffect } from "react";
-import { Sparkles, User } from "lucide-react";
+import { Sparkles, User, Download } from "lucide-react";
 import { useProfile } from "../hooks/useProfile";
+import api from "../api/client";
 
 export default function Profile() {
   const { bio, bioSummary, loading, error, saveBio, summarizeBio } = useProfile();
@@ -6517,6 +8033,8 @@ export default function Profile() {
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [summarizeError, setSummarizeError] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
 
   // Sincronizar el textarea cuando carga el perfil
   useEffect(() => {
@@ -6547,6 +8065,25 @@ export default function Profile() {
       setSummarizeError(err?.response?.data?.detail || "No se pudo generar el resumen.");
     } finally {
       setSummarizing(false);
+    }
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    setExportError("");
+    try {
+      const res = await api.get("/profile/export", { responseType: "blob" });
+      const today = new Date().toISOString().slice(0, 10);
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `rutina_export_${today}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setExportError("No se pudo generar la exportación. Intenta de nuevo.");
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -6642,6 +8179,42 @@ export default function Profile() {
       </div>
 
       {error && <p className="rounded-lg bg-coral-soft px-3 py-2 text-sm text-coral">{error}</p>}
+
+      {/* Exportar datos */}
+      <div className="rounded-2xl border border-line bg-panel p-5 flex flex-col gap-3">
+        <div className="flex items-center gap-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-mint-soft text-mint">
+            <Download size={15} />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-ink">Exportar todos mis datos</p>
+            <p className="text-xs text-ink-faint">
+              Descarga tus hábitos, historial, diario, sesiones y perfil en un ZIP con CSVs listos para Excel.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-md bg-bg border border-line px-2 py-0.5 text-xs text-ink-faint">habitos.csv</span>
+          <span className="rounded-md bg-bg border border-line px-2 py-0.5 text-xs text-ink-faint">historial_habitos.csv</span>
+          <span className="rounded-md bg-bg border border-line px-2 py-0.5 text-xs text-ink-faint">sesiones_temporizador.csv</span>
+          <span className="rounded-md bg-bg border border-line px-2 py-0.5 text-xs text-ink-faint">diario.csv</span>
+          <span className="rounded-md bg-bg border border-line px-2 py-0.5 text-xs text-ink-faint">perfil.csv</span>
+        </div>
+
+        {exportError && (
+          <p className="rounded-lg bg-coral-soft px-3 py-2 text-sm text-coral">{exportError}</p>
+        )}
+
+        <button
+          onClick={handleExport}
+          disabled={exporting}
+          className="flex w-fit items-center gap-2 rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-50 cursor-pointer"
+        >
+          <Download size={14} />
+          {exporting ? "Preparando descarga…" : "Descargar todos mis datos (.ZIP)"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -6916,7 +8489,9 @@ import {
   Legend,
 } from "recharts";
 import { useStats } from "../hooks/useStats";
+import { useWildcard } from "../hooks/useWildcard";
 import StatCard from "../components/StatCard";
+import WildcardWidget from "../components/WildcardWidget";
 import { categoryMeta } from "../lib/categories";
 
 function tokenToHex(token, isDark) {
@@ -6943,6 +8518,7 @@ function tokenToHex(token, isDark) {
 
 export default function Stats() {
   const { summary, weekly, byCategory, loading, error } = useStats();
+  const { wildcard, gained, checkMilestone, useWildcardForDate } = useWildcard();
   const isDark = document.documentElement.classList.contains("dark");
 
   const gridColor = isDark ? "#232E47" : "#E3E7F0";
@@ -6977,6 +8553,13 @@ export default function Stats() {
         <StatCard label="Semana" value={`${summary.week_completion_rate}%`} sublabel="cumplimiento" accent="violet" />
         <StatCard label="Total completados" value={summary.total_completed} sublabel="hábitos" accent="sky" />
       </div>
+
+      <WildcardWidget
+        wildcard={wildcard}
+        currentStreak={summary.current_streak}
+        gained={gained}
+        onUse={useWildcardForDate}
+      />
 
       <div className="rounded-2xl border border-line bg-panel p-4 md:p-6">
         <h2 className="mb-4 text-sm font-semibold text-ink-soft">
@@ -7063,6 +8646,873 @@ export default function Stats() {
 }
 
 
+=== frontend\src\pages\Timer.jsx ===
+import { useState, useEffect, useRef, useMemo } from "react";
+import {
+  Play, Pause, RotateCcw, Check, Clock, Flame, Calendar,
+  BarChart2, Trash2, Tag, ChevronDown, CheckCircle2, AlertCircle,
+  Volume2, VolumeX, Sparkles
+} from "lucide-react";
+import api from "../api/client";
+import { useHabits } from "../hooks/useHabits";
+import { todayLocalISODate } from "../lib/schedule";
+
+// Función utilitaria para reproducir un sonido de campanada agradable con Web Audio API
+function playCompletionSound() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+
+    // Campana de 3 tonos armónicos suaves
+    const tones = [523.25, 659.25, 783.99, 1046.5]; // C5, E5, G5, C6
+    tones.forEach((freq, index) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      const startTime = ctx.currentTime + index * 0.12;
+      const duration = 1.2;
+
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, startTime);
+
+      gain.gain.setValueAtTime(0, startTime);
+      gain.gain.linearRampToValueAtTime(0.2, startTime + 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(startTime);
+      osc.stop(startTime + duration);
+    });
+  } catch (e) {
+    console.warn("No se pudo reproducir audio:", e);
+  }
+}
+
+function formatTime(totalSeconds) {
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
+  return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+}
+
+function formatDurationHuman(seconds) {
+  if (seconds < 60) return `${seconds}s`;
+  const mins = Math.floor(seconds / 60);
+  const remainingSecs = seconds % 60;
+  if (mins < 60) {
+    return remainingSecs > 0 ? `${mins}m ${remainingSecs}s` : `${mins} min`;
+  }
+  const hours = Math.floor(mins / 60);
+  const remMins = mins % 60;
+  return remMins > 0 ? `${hours}h ${remMins}m` : `${hours}h`;
+}
+
+function formatHour(isoString) {
+  if (!isoString) return "";
+  try {
+    const d = new Date(isoString);
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return "";
+  }
+}
+
+function formatDateLabel(isoString) {
+  if (!isoString) return "";
+  try {
+    const d = new Date(isoString);
+    const today = new Date();
+    const isToday = d.toDateString() === today.toDateString();
+    if (isToday) return "Hoy";
+    return d.toLocaleDateString([], { day: "numeric", month: "short" });
+  } catch {
+    return "";
+  }
+}
+
+const PRESETS = [
+  { label: "25 min", minutes: 25, title: "Pomodoro" },
+  { label: "50 min", minutes: 50, title: "Enfoque profundo" },
+  { label: "15 min", minutes: 15, title: "Rápido" },
+  { label: "5 min", minutes: 5, title: "Descanso" },
+];
+
+export default function Timer() {
+  const { habits, refresh: refreshHabits } = useHabits();
+
+  // Configuración del timer
+  const [selectedHabitId, setSelectedHabitId] = useState("");
+  const [targetMinutes, setTargetMinutes] = useState(25);
+  const [customMinutes, setCustomMinutes] = useState("");
+  const [remainingSeconds, setRemainingSeconds] = useState(25 * 60);
+  const [isRunning, setIsRunning] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+
+  // Registro de sesión en curso
+  const [sessionStartTime, setSessionStartTime] = useState(null);
+  const [pausedElapsedSeconds, setPausedElapsedSeconds] = useState(0);
+
+  // Modal para guardar sesión terminada
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
+  const [sessionToSave, setSessionToSave] = useState(null);
+  const [saveNotes, setSaveNotes] = useState("");
+  const [autoMarkDone, setAutoMarkDone] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Historial y Estadísticas
+  const [sessions, setSessions] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [loadingData, setLoadingData] = useState(false);
+  const [activeTab, setActiveTab] = useState("timer"); // "timer" | "history"
+
+  // Hábitos activos
+  const activeHabits = useMemo(() => {
+    return (habits || []).filter((h) => h.is_active);
+  }, [habits]);
+
+  // Hábito actualmente seleccionado
+  const selectedHabit = useMemo(() => {
+    return activeHabits.find((h) => h.id === Number(selectedHabitId)) || null;
+  }, [activeHabits, selectedHabitId]);
+
+  // Cargar estadísticas y sesiones
+  const loadHistoryAndStats = async () => {
+    setLoadingData(true);
+    try {
+      const [sessionsRes, statsRes] = await Promise.all([
+        api.get("/timer/sessions", { params: { limit: 20 } }),
+        api.get("/timer/stats"),
+      ]);
+      setSessions(sessionsRes.data);
+      setStats(statsRes.data);
+    } catch (err) {
+      console.error("Error al cargar datos del timer:", err);
+    } finally {
+      setLoadingData(false);
+    }
+  };
+
+  useEffect(() => {
+    loadHistoryAndStats();
+  }, []);
+
+  // Timer Tick Interval
+  const timerRef = useRef(null);
+
+  useEffect(() => {
+    if (isRunning) {
+      timerRef.current = setInterval(() => {
+        setRemainingSeconds((prev) => {
+          if (prev <= 1) {
+            clearInterval(timerRef.current);
+            handleTimerComplete();
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [isRunning, sessionStartTime, targetMinutes]);
+
+  // Actualizar el título de la pestaña con la cuenta regresiva
+  useEffect(() => {
+    if (isRunning) {
+      document.title = `(${formatTime(remainingSeconds)}) Pomodoro - Rutina`;
+    } else {
+      document.title = "Timer - Rutina";
+    }
+  }, [isRunning, remainingSeconds]);
+
+  // Manejar cuando llega a 00:00
+  const handleTimerComplete = () => {
+    setIsRunning(false);
+    if (soundEnabled) {
+      playCompletionSound();
+    }
+    const endTime = new Date();
+    const startTime = sessionStartTime || new Date(endTime.getTime() - targetMinutes * 60 * 1000);
+    const durationSecs = targetMinutes * 60;
+
+    setSessionToSave({
+      habit_id: selectedHabitId ? Number(selectedHabitId) : null,
+      habit_name: selectedHabit ? selectedHabit.name : "Sesión general",
+      start_time: startTime.toISOString(),
+      end_time: endTime.toISOString(),
+      duration_seconds: durationSecs,
+      session_type: "pomodoro",
+    });
+    setSaveModalOpen(true);
+  };
+
+  // Iniciar timer
+  const handleStart = () => {
+    if (!sessionStartTime) {
+      setSessionStartTime(new Date());
+    }
+    setIsRunning(true);
+  };
+
+  // Pausar timer
+  const handlePause = () => {
+    setIsRunning(false);
+  };
+
+  // Reiniciar timer
+  const handleReset = () => {
+    setIsRunning(false);
+    setRemainingSeconds(targetMinutes * 60);
+    setSessionStartTime(null);
+    setPausedElapsedSeconds(0);
+  };
+
+  // Cambiar duración preset
+  const handleSelectPreset = (mins) => {
+    if (isRunning) return;
+    setTargetMinutes(mins);
+    setRemainingSeconds(mins * 60);
+    setSessionStartTime(null);
+    setCustomMinutes("");
+  };
+
+  // Aplicar minutos personalizados
+  const handleApplyCustomMinutes = (e) => {
+    e.preventDefault();
+    const val = parseInt(customMinutes, 10);
+    if (val && val > 0 && val <= 360) {
+      if (isRunning) return;
+      setTargetMinutes(val);
+      setRemainingSeconds(val * 60);
+      setSessionStartTime(null);
+    }
+  };
+
+  // Finalizar antes de tiempo y registrar lo trabajado
+  const handleFinishEarly = () => {
+    if (!sessionStartTime && remainingSeconds === targetMinutes * 60) return;
+    const endTime = new Date();
+    const totalDuration = targetMinutes * 60;
+    const elapsed = Math.max(1, totalDuration - remainingSeconds);
+
+    setIsRunning(false);
+
+    setSessionToSave({
+      habit_id: selectedHabitId ? Number(selectedHabitId) : null,
+      habit_name: selectedHabit ? selectedHabit.name : "Sesión general",
+      start_time: (sessionStartTime || new Date(endTime.getTime() - elapsed * 1000)).toISOString(),
+      end_time: endTime.toISOString(),
+      duration_seconds: elapsed,
+      session_type: "pomodoro",
+    });
+    setSaveModalOpen(true);
+  };
+
+  // Confirmar y guardar la sesión
+  const handleSaveSession = async () => {
+    if (!sessionToSave) return;
+    setIsSaving(true);
+    try {
+      await api.post("/timer/sessions", {
+        habit_id: sessionToSave.habit_id,
+        start_time: sessionToSave.start_time,
+        end_time: sessionToSave.end_time,
+        duration_seconds: sessionToSave.duration_seconds,
+        session_type: sessionToSave.session_type,
+        notes: saveNotes.trim(),
+        auto_mark_done: autoMarkDone && !!sessionToSave.habit_id,
+        log_date: todayLocalISODate(),
+      });
+
+      // Recargar datos y resetear
+      await loadHistoryAndStats();
+      if (autoMarkDone && sessionToSave.habit_id) {
+        refreshHabits();
+      }
+
+      setSaveModalOpen(false);
+      setSessionToSave(null);
+      setSaveNotes("");
+      handleReset();
+    } catch (err) {
+      alert("Error al guardar la sesión: " + (err?.response?.data?.detail || err.message));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Eliminar una sesión guardada
+  const handleDeleteSession = async (sessionId) => {
+    if (!window.confirm("¿Eliminar este registro de tiempo?")) return;
+    try {
+      await api.delete(`/timer/sessions/${sessionId}`);
+      loadHistoryAndStats();
+    } catch (err) {
+      alert("Error al eliminar la sesión.");
+    }
+  };
+
+  // Porcentaje completado para el dial
+  const totalTargetSecs = targetMinutes * 60;
+  const progressPercent = Math.min(
+    100,
+    Math.max(0, ((totalTargetSecs - remainingSeconds) / totalTargetSecs) * 100)
+  );
+
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-8 pb-24 md:pb-12">
+      {/* Encabezado */}
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-line pb-6">
+        <div>
+          <h1 className="font-mono text-2xl font-bold tracking-tight text-ink">
+            Temporizador de Enfoque
+          </h1>
+          <p className="mt-1 text-sm text-ink-soft">
+            Dedica bloques de tiempo a tus hábitos y registra cuándo comenzaste y terminaste.
+          </p>
+        </div>
+
+        {/* Pestañas para mobile y desktop */}
+        <div className="flex items-center gap-1 rounded-xl bg-panel-alt p-1 border border-line">
+          <button
+            onClick={() => setActiveTab("timer")}
+            className={[
+              "flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-all cursor-pointer",
+              activeTab === "timer"
+                ? "bg-panel text-signal shadow-sm"
+                : "text-ink-soft hover:text-ink",
+            ].join(" ")}
+          >
+            <Clock size={15} />
+            Reloj
+          </button>
+          <button
+            onClick={() => setActiveTab("history")}
+            className={[
+              "flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-all cursor-pointer",
+              activeTab === "history"
+                ? "bg-panel text-signal shadow-sm"
+                : "text-ink-soft hover:text-ink",
+            ].join(" ")}
+          >
+            <BarChart2 size={15} />
+            Estadísticas & Historial
+          </button>
+        </div>
+      </div>
+
+      {/* ─── VISTA DEL RELOJ ─── */}
+      {activeTab === "timer" && (
+        <div className="mt-8 space-y-8">
+          {/* Card Principal del Temporizador */}
+          <div className="relative overflow-hidden rounded-2xl border border-line bg-panel p-6 shadow-sm md:p-10">
+            {/* Selector de Hábito */}
+            <div className="mx-auto max-w-md">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-ink-faint mb-2 text-center">
+                ¿A qué hábito le dedicarás este tiempo?
+              </label>
+              <div className="relative">
+                <select
+                  disabled={isRunning}
+                  value={selectedHabitId}
+                  onChange={(e) => {
+                    const hId = e.target.value;
+                    setSelectedHabitId(hId);
+                    const found = activeHabits.find((h) => h.id === Number(hId));
+                    if (found && found.duration_minutes && !isRunning) {
+                      setTargetMinutes(found.duration_minutes);
+                      setRemainingSeconds(found.duration_minutes * 60);
+                      setSessionStartTime(null);
+                    }
+                  }}
+                  className="w-full appearance-none rounded-xl border border-line bg-panel-alt px-4 py-3 pr-10 text-sm font-medium text-ink focus:border-signal focus:outline-none focus:ring-1 focus:ring-signal transition-colors cursor-pointer disabled:opacity-75"
+                >
+                  <option value="">🎯 General / Sin hábito específico</option>
+                  {activeHabits.map((h) => (
+                    <option key={h.id} value={h.id}>
+                      {h.name} {h.category ? `(${h.category})` : ""}
+                      {h.duration_minutes ? ` • ${h.duration_minutes} min` : ""}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown
+                  size={18}
+                  className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-ink-faint"
+                />
+              </div>
+
+              {selectedHabit && (
+                <div className="mt-2.5 flex items-center justify-center gap-2 text-xs text-ink-soft">
+                  <span className="inline-block h-2 w-2 rounded-full bg-signal" />
+                  <span>Categoría: <strong className="text-ink">{selectedHabit.category}</strong></span>
+                  {selectedHabit.description && (
+                    <span className="truncate max-w-[200px] text-ink-faint">
+                      — {selectedHabit.description}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Presets de Duración */}
+            <div className="mt-8 flex flex-wrap items-center justify-center gap-2">
+              {PRESETS.map((p) => {
+                const isActive = targetMinutes === p.minutes && !customMinutes;
+                return (
+                  <button
+                    key={p.minutes}
+                    disabled={isRunning}
+                    onClick={() => handleSelectPreset(p.minutes)}
+                    className={[
+                      "rounded-xl px-4 py-2 text-xs font-semibold transition-all cursor-pointer disabled:cursor-not-allowed",
+                      isActive
+                        ? "bg-signal text-white shadow-sm"
+                        : "bg-panel-alt text-ink-soft hover:bg-line/60 hover:text-ink disabled:opacity-60",
+                    ].join(" ")}
+                  >
+                    {p.label}
+                  </button>
+                );
+              })}
+
+              {/* Minutos manuales */}
+              <form onSubmit={handleApplyCustomMinutes} className="flex items-center">
+                <input
+                  type="number"
+                  min="1"
+                  max="360"
+                  placeholder="Min..."
+                  disabled={isRunning}
+                  value={customMinutes}
+                  onChange={(e) => setCustomMinutes(e.target.value)}
+                  className="w-20 rounded-l-xl border border-line bg-panel-alt px-3 py-2 text-xs font-medium text-ink focus:border-signal focus:outline-none disabled:opacity-60"
+                />
+                <button
+                  type="submit"
+                  disabled={isRunning || !customMinutes}
+                  className="rounded-r-xl border-y border-r border-line bg-panel-alt px-3 py-2 text-xs font-semibold text-ink-soft hover:text-signal disabled:opacity-50 cursor-pointer"
+                >
+                  Fijar
+                </button>
+              </form>
+            </div>
+
+            {/* Dial Circular del Reloj */}
+            <div className="mt-10 flex flex-col items-center justify-center">
+              <div className="relative flex h-64 w-64 items-center justify-center">
+                {/* SVG Dial */}
+                <svg className="h-full w-full -rotate-90 transform" viewBox="0 0 100 100">
+                  {/* Track de fondo */}
+                  <circle
+                    cx="50"
+                    cy="50"
+                    r="44"
+                    className="text-panel-alt stroke-current"
+                    strokeWidth="6"
+                    fill="transparent"
+                  />
+                  {/* Progreso */}
+                  <circle
+                    cx="50"
+                    cy="50"
+                    r="44"
+                    className="text-signal stroke-current transition-all duration-1000 ease-linear"
+                    strokeWidth="6"
+                    strokeDasharray={276.46}
+                    strokeDashoffset={276.46 - (276.46 * progressPercent) / 100}
+                    strokeLinecap="round"
+                    fill="transparent"
+                  />
+                </svg>
+
+                {/* Contenido dentro del dial */}
+                <div className="absolute flex flex-col items-center justify-center text-center">
+                  <span className="font-mono text-5xl font-bold tracking-tight text-ink">
+                    {formatTime(remainingSeconds)}
+                  </span>
+                  <span className="mt-1 text-xs font-semibold uppercase tracking-wider text-ink-faint">
+                    {isRunning ? "Enfocado" : remainingSeconds === 0 ? "Completado" : "Listo"}
+                  </span>
+                  {sessionStartTime && (
+                    <span className="mt-1 font-mono text-[11px] text-ink-soft">
+                      Iniciado: {formatHour(sessionStartTime.toISOString())}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Botón de Silencio / Sonido */}
+              <button
+                onClick={() => setSoundEnabled((v) => !v)}
+                title={soundEnabled ? "Sonido activado al finalizar" : "Sonido desactivado"}
+                className="mt-4 flex items-center gap-1.5 text-xs text-ink-faint hover:text-ink transition-colors cursor-pointer"
+              >
+                {soundEnabled ? <Volume2 size={15} /> : <VolumeX size={15} />}
+                <span>{soundEnabled ? "Campana activada" : "Silencio"}</span>
+              </button>
+            </div>
+
+            {/* Controles Principales */}
+            <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+              {!isRunning ? (
+                <button
+                  onClick={handleStart}
+                  className="flex items-center gap-2 rounded-xl bg-signal px-8 py-3.5 text-sm font-semibold text-white shadow-md hover:opacity-95 transition-all cursor-pointer"
+                >
+                  <Play size={18} fill="currentColor" />
+                  {remainingSeconds < totalTargetSecs ? "Reanudar" : "Comenzar Sesión"}
+                </button>
+              ) : (
+                <button
+                  onClick={handlePause}
+                  className="flex items-center gap-2 rounded-xl bg-panel-alt border border-line px-7 py-3.5 text-sm font-semibold text-ink hover:bg-line/40 transition-all cursor-pointer"
+                >
+                  <Pause size={18} fill="currentColor" />
+                  Pausar
+                </button>
+              )}
+
+              {/* Reiniciar */}
+              {(remainingSeconds < totalTargetSecs || sessionStartTime) && (
+                <button
+                  onClick={handleReset}
+                  title="Reiniciar temporizador"
+                  className="flex items-center gap-1.5 rounded-xl border border-line bg-panel-alt px-4 py-3.5 text-sm font-medium text-ink-soft hover:text-coral transition-colors cursor-pointer"
+                >
+                  <RotateCcw size={16} />
+                  Reiniciar
+                </button>
+              )}
+
+              {/* Terminar antes y guardar */}
+              {sessionStartTime && (
+                <button
+                  onClick={handleFinishEarly}
+                  title="Guardar el tiempo trabajado hasta el momento"
+                  className="flex items-center gap-1.5 rounded-xl border border-mint/40 bg-mint-soft px-5 py-3.5 text-sm font-semibold text-mint hover:bg-mint-soft/80 transition-colors cursor-pointer"
+                >
+                  <Check size={16} />
+                  Terminar y Guardar
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Resumen Rápido Inferior */}
+          {stats && (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <div className="rounded-2xl border border-line bg-panel p-5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-ink-faint">
+                    Tiempo Hoy
+                  </span>
+                  <Flame size={18} className="text-signal" />
+                </div>
+                <p className="mt-2 font-mono text-2xl font-bold text-ink">
+                  {formatDurationHuman(stats.today_seconds)}
+                </p>
+                <p className="mt-1 text-xs text-ink-soft">
+                  {stats.today_sessions_count} {stats.today_sessions_count === 1 ? "sesión" : "sesiones"} hoy
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-line bg-panel p-5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-ink-faint">
+                    Últimos 7 Días
+                  </span>
+                  <Calendar size={18} className="text-mint" />
+                </div>
+                <p className="mt-2 font-mono text-2xl font-bold text-ink">
+                  {formatDurationHuman(stats.week_seconds)}
+                </p>
+                <p className="mt-1 text-xs text-ink-soft">Enfoque acumulado</p>
+              </div>
+
+              <div className="rounded-2xl border border-line bg-panel p-5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-ink-faint">
+                    Total Histórico
+                  </span>
+                  <Sparkles size={18} className="text-violet" />
+                </div>
+                <p className="mt-2 font-mono text-2xl font-bold text-ink">
+                  {formatDurationHuman(stats.total_seconds)}
+                </p>
+                <p className="mt-1 text-xs text-ink-soft">En todos tus hábitos</p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ─── VISTA DE ESTADÍSTICAS & HISTORIAL ─── */}
+      {activeTab === "history" && (
+        <div className="mt-8 space-y-8">
+          {/* Tarjetas Superiores */}
+          {stats && (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <div className="rounded-2xl border border-line bg-panel p-5">
+                <span className="text-xs font-semibold uppercase tracking-wider text-ink-faint">
+                  Tiempo Hoy
+                </span>
+                <p className="mt-2 font-mono text-2xl font-bold text-ink">
+                  {formatDurationHuman(stats.today_seconds)}
+                </p>
+                <p className="mt-1 text-xs text-ink-soft">
+                  {stats.today_sessions_count} sesiones realizadas
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-line bg-panel p-5">
+                <span className="text-xs font-semibold uppercase tracking-wider text-ink-faint">
+                  Esta Semana
+                </span>
+                <p className="mt-2 font-mono text-2xl font-bold text-ink">
+                  {formatDurationHuman(stats.week_seconds)}
+                </p>
+                <p className="mt-1 text-xs text-ink-soft">Tiempo de enfoque</p>
+              </div>
+
+              <div className="rounded-2xl border border-line bg-panel p-5">
+                <span className="text-xs font-semibold uppercase tracking-wider text-ink-faint">
+                  Total Registrado
+                </span>
+                <p className="mt-2 font-mono text-2xl font-bold text-ink">
+                  {formatDurationHuman(stats.total_seconds)}
+                </p>
+                <p className="mt-1 text-xs text-ink-soft">En la aplicación</p>
+              </div>
+            </div>
+          )}
+
+          {/* Desglose de Tiempo por Hábito */}
+          <div className="rounded-2xl border border-line bg-panel p-6 shadow-sm">
+            <h2 className="font-mono text-base font-bold text-ink">
+              Distribución de Tiempo por Hábito
+            </h2>
+            <p className="mt-1 text-xs text-ink-soft">
+              Cuánto tiempo total le has dedicado a cada hábito registrado.
+            </p>
+
+            {stats?.habits_breakdown?.length > 0 ? (
+              <div className="mt-6 space-y-4">
+                {stats.habits_breakdown.map((item) => {
+                  const maxSeconds = stats.total_seconds || 1;
+                  const percent = Math.round((item.total_seconds / maxSeconds) * 100);
+
+                  return (
+                    <div key={item.habit_id || "unassigned"} className="space-y-1.5">
+                      <div className="flex items-center justify-between text-xs font-medium">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-ink">{item.habit_name}</span>
+                          <span className="rounded-md bg-panel-alt px-1.5 py-0.5 text-[10px] text-ink-faint">
+                            {item.category}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-ink-faint text-[11px]">
+                            {item.session_count} {item.session_count === 1 ? "sesión" : "sesiones"}
+                          </span>
+                          <span className="font-mono font-bold text-ink">
+                            {formatDurationHuman(item.total_seconds)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Barra de progreso */}
+                      <div className="h-2 w-full overflow-hidden rounded-full bg-panel-alt">
+                        <div
+                          className="h-full rounded-full bg-signal transition-all duration-500"
+                          style={{ width: `${Math.max(5, percent)}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="mt-6 rounded-xl border border-dashed border-line p-8 text-center text-xs text-ink-faint">
+                Aún no hay sesiones registradas. Inicia un temporizador para comenzar a acumular datos.
+              </div>
+            )}
+          </div>
+
+          {/* Historial Detallado de Sesiones */}
+          <div className="rounded-2xl border border-line bg-panel p-6 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="font-mono text-base font-bold text-ink">
+                  Historial Reciente de Sesiones
+                </h2>
+                <p className="mt-1 text-xs text-ink-soft">
+                  Registro cronológico de horas de inicio, término y duración por sesión.
+                </p>
+              </div>
+            </div>
+
+            {sessions.length > 0 ? (
+              <div className="mt-6 divide-y divide-line overflow-hidden rounded-xl border border-line">
+                {sessions.map((s) => (
+                  <div
+                    key={s.id}
+                    className="flex flex-wrap items-center justify-between gap-4 bg-panel px-4 py-3.5 hover:bg-panel-alt/50 transition-colors"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm text-ink truncate">
+                          {s.habit?.name || "Sesión General"}
+                        </span>
+                        {s.habit?.category && (
+                          <span className="rounded bg-panel-alt px-1.5 py-0.5 text-[10px] text-ink-soft">
+                            {s.habit.category}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-ink-soft">
+                        <span className="flex items-center gap-1 font-mono text-[11px]">
+                          <Calendar size={13} className="text-ink-faint" />
+                          {formatDateLabel(s.start_time)}
+                        </span>
+                        <span className="flex items-center gap-1 font-mono text-[11px]">
+                          <Clock size={13} className="text-ink-faint" />
+                          {formatHour(s.start_time)} → {formatHour(s.end_time)}
+                        </span>
+                        {s.notes && (
+                          <span className="text-ink-faint italic truncate max-w-xs">
+                            "{s.notes}"
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <span className="font-mono text-sm font-bold text-signal">
+                        {formatDurationHuman(s.duration_seconds)}
+                      </span>
+
+                      <button
+                        onClick={() => handleDeleteSession(s.id)}
+                        title="Eliminar registro"
+                        className="rounded-lg p-1.5 text-ink-faint hover:bg-coral-soft hover:text-coral transition-colors cursor-pointer"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-6 rounded-xl border border-dashed border-line p-8 text-center text-xs text-ink-faint">
+                No hay sesiones en el historial todavía.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ─── MODAL GUARDAR SESIÓN COMPLETADA ─── */}
+      {saveModalOpen && sessionToSave && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-line bg-panel p-6 shadow-xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-3 text-mint">
+              <CheckCircle2 size={28} />
+              <div>
+                <h3 className="font-mono text-lg font-bold text-ink">¡Sesión Finalizada!</h3>
+                <p className="text-xs text-ink-soft">Tiempo de enfoque completado con éxito</p>
+              </div>
+            </div>
+
+            {/* Resumen de tiempos */}
+            <div className="mt-5 rounded-xl border border-line bg-panel-alt p-4 space-y-2 text-xs">
+              <div className="flex justify-between">
+                <span className="text-ink-soft">Hábito:</span>
+                <span className="font-semibold text-ink">{sessionToSave.habit_name}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-ink-soft">Hora de inicio:</span>
+                <span className="font-mono text-ink">{formatHour(sessionToSave.start_time)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-ink-soft">Hora de término:</span>
+                <span className="font-mono text-ink">{formatHour(sessionToSave.end_time)}</span>
+              </div>
+              <div className="flex justify-between border-t border-line pt-2">
+                <span className="font-medium text-ink">Tiempo dedicado:</span>
+                <span className="font-mono font-bold text-signal text-sm">
+                  {formatDurationHuman(sessionToSave.duration_seconds)}
+                </span>
+              </div>
+            </div>
+
+            {/* Checkbox auto-marcar como completado */}
+            {sessionToSave.habit_id && (
+              <label className="mt-4 flex items-start gap-2.5 text-xs text-ink cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={autoMarkDone}
+                  onChange={(e) => setAutoMarkDone(e.target.checked)}
+                  className="mt-0.5 rounded border-line text-signal focus:ring-signal"
+                />
+                <div>
+                  <span className="font-semibold">Marcar como completado hoy</span>
+                  <p className="text-ink-soft text-[11px]">
+                    Registra automáticamente este hábito como hecho en tu lista del día.
+                  </p>
+                </div>
+              </label>
+            )}
+
+            {/* Nota opcional */}
+            <div className="mt-4">
+              <label className="block text-xs font-semibold text-ink-soft mb-1">
+                Nota opcional (¿Qué lograste o avanzaste?):
+              </label>
+              <textarea
+                value={saveNotes}
+                onChange={(e) => setSaveNotes(e.target.value)}
+                placeholder="Ej. Leí hasta el capítulo 5, resolví el bug..."
+                rows={2}
+                maxLength={500}
+                className="w-full rounded-xl border border-line bg-panel-alt p-2.5 text-xs text-ink placeholder:text-ink-faint focus:border-signal focus:outline-none"
+              />
+            </div>
+
+            {/* Botones de acción */}
+            <div className="mt-6 flex items-center justify-end gap-3">
+              <button
+                onClick={() => {
+                  setSaveModalOpen(false);
+                  setSessionToSave(null);
+                  handleReset();
+                }}
+                disabled={isSaving}
+                className="rounded-xl px-4 py-2.5 text-xs font-medium text-ink-soft hover:text-ink transition-colors cursor-pointer"
+              >
+                Descartar
+              </button>
+              <button
+                onClick={handleSaveSession}
+                disabled={isSaving}
+                className="flex items-center gap-1.5 rounded-xl bg-signal px-5 py-2.5 text-xs font-semibold text-white shadow-sm hover:opacity-95 transition-all cursor-pointer disabled:opacity-50"
+              >
+                {isSaving ? "Guardando..." : "Guardar Registro"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 === frontend\vite.config.js ===
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
@@ -7072,6 +9522,7 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
+    allowedHosts: true,
     historyApiFallback: true,
     proxy: {
       '/api': {

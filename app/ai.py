@@ -8,6 +8,7 @@ import time
 import logging
 import json
 import urllib.request
+import urllib.error
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ def _load_api_keys() -> list[str]:
 
 GEMINI_API_KEYS: list[str] = _load_api_keys()
 
-MODEL = "gemini-3.1-flash-lite"        # modelo preview gratuito de Gemini 3.1
+MODEL = "gemini-3.5-flash-lite"
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 MAX_RETRIES = 3
@@ -75,26 +76,45 @@ def _call_gemini(api_key: str, messages: list[dict], max_tokens: int = 500) -> s
         method="POST",
     )
 
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        result = json.loads(resp.read())
-        return result["candidates"][0]["content"]["parts"][0]["text"].strip()
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read())
+            return result["candidates"][0]["content"]["parts"][0]["text"].strip()
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        logger.error("Gemini HTTP %s — body: %s", e.code, body)
+        raise
 
 
 def _call_with_fallback(messages: list[dict], max_tokens: int = 500) -> Optional[str]:
-    """Intenta con cada key disponible, con reintentos por key."""
+    """Intenta con cada key disponible, con reintentos por key.
+    Si el error es de autenticación (401/400 API_KEY_INVALID), pasa a la
+    siguiente key de inmediato sin reintentar la misma.
+    """
     if not GEMINI_API_KEYS:
         logger.warning("No OPENAI_API_KEY (Gemini key) configured")
         return None
 
     for key_index, api_key in enumerate(GEMINI_API_KEYS):
+        logger.info("Trying key #%d (starts: %s...)", key_index + 1, api_key[:8])
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 logger.info("Gemini call attempt %d/%d with key #%d", attempt, MAX_RETRIES, key_index + 1)
                 result = _call_gemini(api_key, messages, max_tokens)
                 logger.info("Gemini call succeeded with key #%d on attempt %d", key_index + 1, attempt)
                 return result
-            except Exception as e:
+            except urllib.error.HTTPError as e:
+                # Si la key es inválida no tiene sentido reintentar — pasar a la siguiente
+                if e.code in (400, 401, 403):
+                    logger.warning(
+                        "Key #%d rejected (HTTP %s), skipping to next key", key_index + 1, e.code
+                    )
+                    break  # sale del loop de reintentos, prueba la siguiente key
                 logger.warning("Key #%d attempt %d/%d failed: %s", key_index + 1, attempt, MAX_RETRIES, e)
+                if attempt < MAX_RETRIES:
+                    time.sleep(RETRY_DELAY)
+            except Exception as e:
+                logger.warning("Key #%d attempt %d/%d failed (exception): %s", key_index + 1, attempt, MAX_RETRIES, e)
                 if attempt < MAX_RETRIES:
                     time.sleep(RETRY_DELAY)
 
