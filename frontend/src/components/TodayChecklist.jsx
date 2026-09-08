@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Check, X, MinusCircle, MessageSquare } from "lucide-react";
+import { Check, X, MinusCircle, MessageSquare, BarChart2 } from "lucide-react";
 import { categoryMeta } from "../lib/categories";
 import { formatTime, toMinutes, todayLocalISODate, habitOccursOnDate } from "../lib/schedule";
 import HabitMoodModal, { getMoodInfo } from "./HabitMoodModal";
+import HabitStatsModal from "./HabitStatsModal";
 
 const STATUS_CONFIG = {
   done: {
@@ -31,7 +32,8 @@ export default function TodayChecklist({ habits, logsByHabitId = {}, onSetStatus
 
   // Estado para el modal de estado de ánimo
   const [moodModalHabit, setMoodModalHabit] = useState(null);
-  const [pendingStatus, setPendingStatus] = useState("done");
+  const [pendingStatus, setPendingStatus]   = useState("done");
+  const [statsHabit, setStatsHabit]         = useState(null);
 
   const todays = habits
     .filter((h) => h.is_active !== false && habitOccursOnDate(h, resolvedDate))
@@ -90,56 +92,70 @@ export default function TodayChecklist({ habits, logsByHabitId = {}, onSetStatus
               key={habit.id}
               className="flex items-center gap-3 px-4 py-3.5 hover:bg-panel-alt/30 transition-colors"
             >
-              {/* Category icon */}
-              <span
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
-                style={{ backgroundColor: `var(--${meta.token}-soft)`, color: `var(--${meta.token})` }}
+              {/* Zona izquierda clickeable → stats (toda la fila excepto los botones de estado) */}
+              <button
+                type="button"
+                onClick={() => setStatsHabit(habit)}
+                title={`Ver estadísticas de ${habit.name}`}
+                className="flex min-w-0 flex-1 items-center gap-3 text-left cursor-pointer group"
               >
-                <Icon size={15} />
-              </span>
+                {/* Category icon */}
+                <span
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-opacity group-hover:opacity-70"
+                  style={{ backgroundColor: `var(--${meta.token}-soft)`, color: `var(--${meta.token})` }}
+                >
+                  <Icon size={15} />
+                </span>
 
-              {/* Name + time + micro-nota */}
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <p className={[
-                    "truncate text-sm font-medium",
-                    currentStatus === "done"
-                      ? "text-ink-faint line-through"
-                      : currentStatus === "failed"
-                      ? "text-coral/70 line-through"
-                      : "text-ink",
-                  ].join(" ")}>
-                    {habit.name}
-                  </p>
+                {/* Name + time + micro-nota */}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className={[
+                      "truncate text-sm font-medium",
+                      currentStatus === "done"
+                        ? "text-ink-faint line-through"
+                        : currentStatus === "failed"
+                        ? "text-coral/70 line-through"
+                        : "text-ink",
+                    ].join(" ")}>
+                      {habit.name}
+                    </p>
 
-                  {/* Chip de Ánimo si ya fue registrado */}
-                  {(currentMood || hasNote) && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPendingStatus(currentStatus || "done");
-                        setMoodModalHabit(habit);
-                      }}
-                      title={log?.note || currentMood?.label}
-                      className="inline-flex items-center gap-1 rounded-full bg-panel-alt border border-line px-2 py-0.5 text-[11px] text-ink hover:border-signal transition-colors cursor-pointer"
-                    >
-                      {currentMood && <span>{currentMood.emoji}</span>}
-                      {hasNote && <MessageSquare size={11} className="text-signal" />}
-                      <span className="text-[10px] font-medium text-ink-soft truncate max-w-[120px]">
-                        {log?.note || currentMood?.label}
+                    {/* Chip de Ánimo si ya fue registrado */}
+                    {(currentMood || hasNote) && (
+                      <span
+                        onClick={(e) => {
+                          e.stopPropagation(); // no abrir stats, abrir mood
+                          setPendingStatus(currentStatus || "done");
+                          setMoodModalHabit(habit);
+                        }}
+                        title={log?.note || currentMood?.label}
+                        className="inline-flex items-center gap-1 rounded-full bg-panel-alt border border-line px-2 py-0.5 text-[11px] text-ink hover:border-signal transition-colors cursor-pointer"
+                      >
+                        {currentMood && <span>{currentMood.emoji}</span>}
+                        {hasNote && <MessageSquare size={11} className="text-signal" />}
+                        <span className="text-[10px] font-medium text-ink-soft truncate max-w-[120px]">
+                          {log?.note || currentMood?.label}
+                        </span>
                       </span>
-                    </button>
-                  )}
+                    )}
+                  </div>
+
+                  {habit.start_time ? (
+                    <p className="font-mono text-xs text-ink-faint tabular">
+                      {formatTime(habit.start_time)} – {formatTime(habit.end_time)}
+                    </p>
+                  ) : habit.duration_minutes ? (
+                    <p className="text-xs text-ink-faint">{habit.duration_minutes} min</p>
+                  ) : null}
                 </div>
 
-                {habit.start_time ? (
-                  <p className="font-mono text-xs text-ink-faint tabular">
-                    {formatTime(habit.start_time)} – {formatTime(habit.end_time)}
-                  </p>
-                ) : habit.duration_minutes ? (
-                  <p className="text-xs text-ink-faint">{habit.duration_minutes} min</p>
-                ) : null}
-              </div>
+                {/* Botón stats — visible solo en desktop */}
+                <BarChart2
+                  size={15}
+                  className="hidden md:block shrink-0 text-ink-faint opacity-0 group-hover:opacity-100 transition-opacity"
+                />
+              </button>
 
               {/* Status buttons — ocultos en fechas futuras */}
               {!isFuture && (
@@ -182,6 +198,14 @@ export default function TodayChecklist({ habits, logsByHabitId = {}, onSetStatus
           initialNote={logsByHabitId[moodModalHabit.id]?.note || ""}
           onSave={handleSaveMood}
           onClose={() => setMoodModalHabit(null)}
+        />
+      )}
+
+      {/* Modal de estadísticas por hábito */}
+      {statsHabit && (
+        <HabitStatsModal
+          habit={statsHabit}
+          onClose={() => setStatsHabit(null)}
         />
       )}
     </>
