@@ -52,7 +52,8 @@ export function habitOccursOnDate(habit, isoDate) {
 
   if (type === "weekly") {
     const weekday = weekdayOfISODate(isoDate);
-    return parseDays(habit.days_of_week).includes(weekday);
+    const days = parseDays(habit.days_of_week ?? "0,1,2,3,4,5,6");
+    return days.includes(weekday);
   }
 
   if (type === "interval") {

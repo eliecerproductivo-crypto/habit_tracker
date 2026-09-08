@@ -259,7 +259,19 @@ export default function HabitStatsModal({ habit, onClose }) {
                 <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink-faint">
                   Actividad — últimas {WEEKS} semanas
                 </h3>
-                <Heatmap habit={{ ...habit, ...data }} logs={data.logs} />
+                <Heatmap
+                  habit={{
+                    ...data,
+                    ...habit,
+                    days_of_week: habit.days_of_week ?? data.days_of_week ?? "0,1,2,3,4,5,6",
+                    start_date: habit.start_date ?? data.start_date,
+                    recurrence_type: habit.recurrence_type ?? data.recurrence_type ?? "weekly",
+                    recurrence_interval: habit.recurrence_interval ?? data.recurrence_interval,
+                    recurrence_day_of_month: habit.recurrence_day_of_month ?? data.recurrence_day_of_month,
+                    created_at: habit.created_at ?? data.created_at,
+                  }}
+                  logs={data.logs}
+                />
               </div>
 
               {/* Historial de logs */}
