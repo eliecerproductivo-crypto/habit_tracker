@@ -124,6 +124,18 @@ class StatsSummary(BaseModel):
     total_completed: int
 
 
+class HabitStatsOut(BaseModel):
+    habit_id: int
+    habit_name: str
+    category: str
+    current_streak: int
+    best_streak: int
+    total_done: int
+    total_scheduled: int      # días programados desde start_date hasta ayer
+    completion_rate: int       # % (done / scheduled, excluyendo skipped)
+    logs: list[LogOut]         # historial completo, desc por fecha
+
+
 class WeeklyStat(BaseModel):
     date: date
     label: str

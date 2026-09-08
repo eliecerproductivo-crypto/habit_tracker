@@ -1,8 +1,8 @@
-import { Pencil, Trash2 } from "lucide-react";
+import { Pencil, Trash2, BarChart2 } from "lucide-react";
 import { categoryMeta } from "../lib/categories";
 import { DAY_LABELS, formatTime, parseDays } from "../lib/schedule";
 
-export default function HabitCard({ habit, onEdit, onDelete }) {
+export default function HabitCard({ habit, onEdit, onDelete, onStats }) {
   const meta = categoryMeta(habit.category);
   const Icon = meta.icon;
   const days = parseDays(habit.days_of_week);
@@ -25,6 +25,15 @@ export default function HabitCard({ habit, onEdit, onDelete }) {
           </div>
         </div>
         <div className="flex shrink-0 gap-1">
+          {onStats && (
+            <button
+              onClick={() => onStats(habit)}
+              aria-label={`Ver estadísticas de ${habit.name}`}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-violet-soft hover:text-violet cursor-pointer"
+            >
+              <BarChart2 size={15} />
+            </button>
+          )}
           <button
             onClick={() => onEdit(habit)}
             aria-label={`Editar ${habit.name}`}

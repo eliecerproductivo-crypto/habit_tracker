@@ -5,21 +5,17 @@ import HabitCard from "../components/HabitCard";
 import HabitForm from "../components/HabitForm";
 import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
+import HabitStatsModal from "../components/HabitStatsModal";
 
 export default function Habits() {
   const { habits, loading, error, createHabit, updateHabit, deleteHabit } = useHabits();
-  const [formOpen, setFormOpen] = useState(false);
-  const [editing, setEditing] = useState(null); // habit being edited, or null for create
-  const [toDelete, setToDelete] = useState(null);
+  const [formOpen, setFormOpen]     = useState(false);
+  const [editing, setEditing]       = useState(null);
+  const [toDelete, setToDelete]     = useState(null);
+  const [statsHabit, setStatsHabit] = useState(null);  // hábito cuyo modal de stats está abierto
 
-  const openCreate = () => {
-    setEditing(null);
-    setFormOpen(true);
-  };
-  const openEdit = (habit) => {
-    setEditing(habit);
-    setFormOpen(true);
-  };
+  const openCreate = () => { setEditing(null); setFormOpen(true); };
+  const openEdit   = (habit) => { setEditing(habit); setFormOpen(true); };
 
   const handleSubmit = async (payload) => {
     if (editing) await updateHabit(editing.id, payload);
@@ -76,6 +72,7 @@ export default function Habits() {
             habit={habit}
             onEdit={openEdit}
             onDelete={setToDelete}
+            onStats={setStatsHabit}
           />
         ))}
       </div>
@@ -104,6 +101,13 @@ export default function Habits() {
         onConfirm={handleDelete}
         onCancel={() => setToDelete(null)}
       />
+
+      {statsHabit && (
+        <HabitStatsModal
+          habit={statsHabit}
+          onClose={() => setStatsHabit(null)}
+        />
+      )}
     </div>
   );
 }

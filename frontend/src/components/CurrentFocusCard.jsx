@@ -43,31 +43,30 @@ export default function CurrentFocusCard({ habits, logsByHabitId = {}, onSetStat
 
   return (
     <section
-      className="rounded-2xl border border-line p-5 shadow-[var(--shadow-card)] md:p-6"
+      className="rounded-2xl border border-line p-3.5 shadow-[var(--shadow-card)] md:p-4"
       style={{
         background: current
           ? `linear-gradient(135deg, var(--${meta.token}-soft), var(--panel))`
           : "var(--panel)",
       }}
     >
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <p className="text-sm capitalize text-ink-soft">{dateLabel}</p>
-        {isToday && <p className="font-mono text-sm tabular text-ink-faint">{clock}</p>}
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5">
+        <p className="text-xs capitalize text-ink-soft">{dateLabel}</p>
+        {isToday && <p className="font-mono text-xs tabular text-ink-faint">{clock}</p>}
       </div>
 
-      <div className="mt-4">
+      <div className="mt-2.5">
         {current ? (
-          <div className="flex flex-col gap-4">
-            {/* Habit info */}
+          <div className="flex flex-col gap-2.5">
             <div className="min-w-0">
               <p
-                className="mb-1 font-mono text-[11px] font-semibold uppercase tracking-wide"
+                className="mb-0.5 font-mono text-[10px] font-semibold uppercase tracking-wide"
                 style={{ color: `var(--${meta.token})` }}
               >
                 Ahora mismo · {meta.label}
               </p>
               <h2 className={[
-                "truncate text-2xl font-semibold tracking-tight md:text-3xl",
+                "truncate text-lg font-semibold tracking-tight md:text-xl",
                 currentStatus === "done"
                   ? "text-ink-faint line-through"
                   : currentStatus === "failed"
@@ -76,13 +75,13 @@ export default function CurrentFocusCard({ habits, logsByHabitId = {}, onSetStat
               ].join(" ")}>
                 {current.name}
               </h2>
-              <p className="mt-1 font-mono text-sm text-ink-soft tabular">
+              <p className="font-mono text-xs text-ink-soft tabular">
                 {formatTime(current.start_time)} – {formatTime(current.end_time)}
               </p>
             </div>
 
             {/* 3-state action buttons */}
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-1.5">
               {STATUS_CONFIG.map(({ key, label, icon: BtnIcon, activeClass, idleClass }) => {
                 const isActive = currentStatus === key;
                 return (
@@ -91,7 +90,7 @@ export default function CurrentFocusCard({ habits, logsByHabitId = {}, onSetStat
                     disabled={!isToday}
                     onClick={() => isToday && onSetStatus(current.id, isActive ? null : key)}
                     className={[
-                      "flex items-center gap-2 rounded-xl border-2 px-4 py-2 text-sm font-semibold transition-colors",
+                      "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors",
                       isToday
                         ? isActive
                           ? `cursor-pointer ${activeClass}`
@@ -99,7 +98,7 @@ export default function CurrentFocusCard({ habits, logsByHabitId = {}, onSetStat
                         : "cursor-not-allowed border-line text-ink-faint opacity-40",
                     ].join(" ")}
                   >
-                    <BtnIcon size={15} strokeWidth={2.5} />
+                    <BtnIcon size={13} strokeWidth={2.5} />
                     {label}
                   </button>
                 );
@@ -108,20 +107,20 @@ export default function CurrentFocusCard({ habits, logsByHabitId = {}, onSetStat
           </div>
         ) : (
           <div>
-            <p className="font-mono text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+            <p className="font-mono text-[10px] font-semibold uppercase tracking-wide text-ink-faint">
               {isToday ? "Sin bloque activo" : "Vista del día"}
             </p>
-            <h2 className="mt-1 text-xl font-semibold text-ink-soft md:text-2xl">
+            <h2 className="mt-0.5 text-base font-semibold text-ink-soft md:text-lg">
               {isToday
-                ? "No tienes un hábito programado en este momento"
+                ? "No tienes un hábito programado ahora"
                 : "Revisa y marca los hábitos de este día abajo"}
             </h2>
           </div>
         )}
 
         {next && (
-          <div className="mt-3 flex items-center gap-1.5 text-sm text-ink-faint">
-            <ArrowRight size={14} />
+          <div className="mt-2 flex items-center gap-1.5 text-xs text-ink-faint">
+            <ArrowRight size={13} />
             <span>
               Siguiente:{" "}
               <span className="font-medium text-ink-soft">{next.name}</span>{" "}
@@ -131,7 +130,7 @@ export default function CurrentFocusCard({ habits, logsByHabitId = {}, onSetStat
         )}
       </div>
 
-      <div className="mt-6">
+      <div className="mt-3">
         <DayRail
           habits={habits}
           now={now}

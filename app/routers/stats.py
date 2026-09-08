@@ -277,3 +277,105 @@ def by_category(db: Session = Depends(get_db), current_user: models.User = Depen
         schemas.CategoryStat(category=cat, completed_count=count)
         for cat, count in sorted(counts.items(), key=lambda kv: -kv[1])
     ]
+
+
+@router.get("/habit/{habit_id}", response_model=schemas.HabitStatsOut)
+def habit_stats(
+    habit_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Estadísticas detalladas de un hábito individual:
+    racha actual, mejor racha, total completados, cumplimiento y logs históricos.
+    """
+    from fastapi import HTTPException as _HTTPException
+
+    habit = (
+        db.query(models.Habit)
+        .filter(models.Habit.id == habit_id, models.Habit.user_id == current_user.id)
+        .first()
+    )
+    if not habit:
+        raise _HTTPException(status_code=404, detail="Hábito no encontrado.")
+
+    logs = (
+        db.query(models.HabitLog)
+        .filter(models.HabitLog.habit_id == habit_id, models.HabitLog.user_id == current_user.id)
+        .order_by(models.HabitLog.date.desc())
+        .all()
+    )
+
+    # Índice rápido fecha → status
+    status_by_date: dict[date_type, str] = {log.date: log.status for log in logs}
+
+    today = date_type.today()
+    effective_start = habit.start_date or habit.created_at.date()
+
+    def occurs_on(d: date_type) -> bool:
+        if d < effective_start:
+            return False
+        return _habit_occurs_on_date(habit, d)
+
+    # ── Racha actual (desde ayer hacia atrás) ─────────────────────────────────
+    current_streak = 0
+    cursor = today - timedelta(days=1)
+    for _ in range(MAX_LOOKBACK_DAYS):
+        if cursor < effective_start:
+            break
+        if not occurs_on(cursor):
+            cursor -= timedelta(days=1)
+            continue
+        s = status_by_date.get(cursor)
+        if s == "done" or s == "skipped":
+            if s == "done":
+                current_streak += 1
+            cursor -= timedelta(days=1)
+        else:
+            break
+
+    # ── Mejor racha histórica ─────────────────────────────────────────────────
+    best_streak = 0
+    running = 0
+    cursor = effective_start
+    while cursor <= today - timedelta(days=1):
+        if occurs_on(cursor):
+            s = status_by_date.get(cursor)
+            if s == "done":
+                running += 1
+                best_streak = max(best_streak, running)
+            elif s == "skipped":
+                pass  # skipped no rompe ni suma racha
+            else:
+                running = 0  # no registrado o failed rompe la racha
+        cursor += timedelta(days=1)
+    best_streak = max(best_streak, current_streak)
+
+    # ── Cumplimiento total (desde start hasta ayer, excluyendo skipped) ───────
+    total_scheduled = 0
+    total_done = 0
+    cursor = effective_start
+    while cursor <= today - timedelta(days=1):
+        if occurs_on(cursor):
+            s = status_by_date.get(cursor)
+            if s == "skipped":
+                pass  # no cuenta ni para bien ni para mal
+            else:
+                total_scheduled += 1
+                if s == "done":
+                    total_done += 1
+        cursor += timedelta(days=1)
+
+    completion_rate = round((total_done / total_scheduled) * 100) if total_scheduled else 0
+
+    return schemas.HabitStatsOut(
+        habit_id=habit.id,
+        habit_name=habit.name,
+        category=habit.category,
+        current_streak=current_streak,
+        best_streak=best_streak,
+        total_done=total_done,
+        total_scheduled=total_scheduled,
+        completion_rate=completion_rate,
+        logs=logs,
+    )

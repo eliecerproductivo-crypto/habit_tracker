@@ -4,6 +4,7 @@ import TodayChecklist from "../components/TodayChecklist";
 import StatCard from "../components/StatCard";
 import WildcardWidget from "../components/WildcardWidget";
 import DateNavBar from "../components/DateNavBar";
+import MonthHeatmap from "../components/MonthHeatmap";
 import { useHabits } from "../hooks/useHabits";
 import { useStats } from "../hooks/useStats";
 import { useWildcard } from "../hooks/useWildcard";
@@ -102,6 +103,11 @@ export default function Dashboard() {
                 refreshStats();
               }}
             />
+          )}
+
+          {/* Heatmap mensual — solo visible en vista de hoy */}
+          {isToday && (
+            <MonthHeatmap habits={allHabits.filter((h) => h.is_active !== false)} />
           )}
 
           <div>
