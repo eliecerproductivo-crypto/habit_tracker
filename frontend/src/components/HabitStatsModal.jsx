@@ -75,6 +75,7 @@ function buildHeatmapGrid(habit, logs) {
     }
     weeks.push(days);
   }
+  console.log("[HM] weeks:", weeks.length, "habit.days_of_week:", habit.days_of_week, "today:", today, "effectiveStart:", effectiveStart);
   return weeks;
   } catch(e) {
     console.error("[Heatmap] buildHeatmapGrid crash:", e.message, e.stack);
