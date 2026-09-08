@@ -127,11 +127,15 @@ def compute_user_stats(db: Session, user: models.User) -> schemas.StatsSummary:
     habits, logs, status_by_date, habits_by_weekday, non_weekly = _load_context(db, user)
     today = date_type.today()
 
+    today_status = _day_status(today, habits_by_weekday, non_weekly, status_by_date)
     current_streak = 0
-    # Hoy nunca se incluye en la racha: el día aún no ha terminado y los hábitos
-    # pueden completarse hasta la medianoche. La racha siempre se calcula desde
-    # ayer hacia atrás para evitar que la racha caiga a 0 durante el día.
-    cursor = today - timedelta(days=1)
+    # Si hoy ya está 100% completado, la racha cuenta desde hoy.
+    # Si hoy aún no está completado, se calcula desde ayer para evitar que la racha caiga a 0 durante el día.
+    if today_status is True:
+        cursor = today
+    else:
+        cursor = today - timedelta(days=1)
+
     for _ in range(MAX_LOOKBACK_DAYS):
         status = _day_status(cursor, habits_by_weekday, non_weekly, status_by_date)
         if status is None:
@@ -146,8 +150,8 @@ def compute_user_stats(db: Session, user: models.User) -> schemas.StatsSummary:
     best_streak = 0
     running = 0
     cursor = today - timedelta(days=MAX_LOOKBACK_DAYS)
-    # No incluir hoy (el día no ha terminado)
-    while cursor <= today - timedelta(days=1):
+    end_date = today if today_status is True else today - timedelta(days=1)
+    while cursor <= end_date:
         status = _day_status(cursor, habits_by_weekday, non_weekly, status_by_date)
         if status is True:
             running += 1
@@ -317,9 +321,16 @@ def habit_stats(
             return False
         return _habit_occurs_on_date(habit, d)
 
-    # ── Racha actual (desde ayer hacia atrás) ─────────────────────────────────
+    # ── Racha actual ─────────────────────────────────────────────────────────
+    # Si hoy ya está completado (o skipped), la racha cuenta desde hoy.
+    # Si hoy aún no está completado, cuenta desde ayer para no romper la racha a mitad de día.
     current_streak = 0
-    cursor = today - timedelta(days=1)
+    today_status = status_by_date.get(today)
+    if occurs_on(today) and today_status in ("done", "skipped"):
+        cursor = today
+    else:
+        cursor = today - timedelta(days=1)
+
     for _ in range(MAX_LOOKBACK_DAYS):
         if cursor < effective_start:
             break
@@ -338,7 +349,10 @@ def habit_stats(
     best_streak = 0
     running = 0
     cursor = effective_start
-    while cursor <= today - timedelta(days=1):
+    # Si hoy está registrado (done o skipped), evaluamos hasta hoy.
+    # Si hoy no está registrado, solo evaluamos hasta ayer para no penalizar el día en curso.
+    end_date = today if (occurs_on(today) and today_status in ("done", "skipped")) else today - timedelta(days=1)
+    while cursor <= end_date:
         if occurs_on(cursor):
             s = status_by_date.get(cursor)
             if s == "done":
@@ -351,11 +365,11 @@ def habit_stats(
         cursor += timedelta(days=1)
     best_streak = max(best_streak, current_streak)
 
-    # ── Cumplimiento total (desde start hasta ayer, excluyendo skipped) ───────
+    # ── Cumplimiento total ───────────────────────────────────────────────────
     total_scheduled = 0
     total_done = 0
     cursor = effective_start
-    while cursor <= today - timedelta(days=1):
+    while cursor <= end_date:
         if occurs_on(cursor):
             s = status_by_date.get(cursor)
             if s == "skipped":

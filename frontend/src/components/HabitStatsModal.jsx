@@ -35,49 +35,53 @@ const DAY_LABELS = ["D", "L", "M", "M", "J", "V", "S"];
 
 function buildHeatmapGrid(habit, logs) {
   try {
-  const today = todayLocalISODate();
+    const today = todayLocalISODate();
 
-  // Fecha efectiva de inicio del hábito
-  const effectiveStart = habit.start_date
-    ? String(habit.start_date).slice(0, 10)
-    : (() => {
-        const createdRaw = habit.created_at || "";
-        const hasZone = createdRaw.endsWith("Z") || /[+-]\d{2}:\d{2}$/.test(createdRaw);
-        const parsed = new Date(hasZone ? createdRaw : createdRaw + "Z");
-        return isNaN(parsed.getTime()) ? today : toLocalISODate(parsed);
-      })();
+    // Fecha efectiva de inicio del hábito
+    const effectiveStart = habit.start_date
+      ? String(habit.start_date).slice(0, 10)
+      : (() => {
+          const createdRaw = habit.created_at || "";
+          const hasZone = createdRaw.endsWith("Z") || /[+-]\d{2}:\d{2}$/.test(createdRaw);
+          const parsed = new Date(hasZone ? createdRaw : createdRaw + "Z");
+          return isNaN(parsed.getTime()) ? today : toLocalISODate(parsed);
+        })();
 
-  // Punto de inicio del grid: domingo de hace WEEKS semanas
-  const gridStart = new Date(today);
-  gridStart.setDate(gridStart.getDate() - (WEEKS * 7 - 1));
-  gridStart.setDate(gridStart.getDate() - gridStart.getDay());
+    // Domingo de la semana actual (usando fecha local para evitar desfases UTC)
+    const [ty, tm, td] = today.split("-").map(Number);
+    const todayDate = new Date(ty, tm - 1, td);
+    const currentWeekSunday = new Date(todayDate);
+    currentWeekSunday.setDate(currentWeekSunday.getDate() - currentWeekSunday.getDay());
 
-  // Índice de logs: { "YYYY-MM-DD": status }
-  const logMap = {};
-  for (const log of logs) {
-    logMap[String(log.date).slice(0, 10)] = log.status;
-  }
+    // Domingo de hace (WEEKS - 1) semanas para que la última columna sea la semana actual
+    const gridStart = new Date(currentWeekSunday);
+    gridStart.setDate(gridStart.getDate() - (WEEKS - 1) * 7);
 
-  const weeks = [];
-  const cursor = new Date(gridStart);
-  for (let w = 0; w < WEEKS; w++) {
-    const days = [];
-    for (let d = 0; d < 7; d++) {
-      const iso = [
-        cursor.getFullYear(),
-        String(cursor.getMonth() + 1).padStart(2, "0"),
-        String(cursor.getDate()).padStart(2, "0"),
-      ].join("-");
-      const isFuture = iso > today;
-      const scheduled = !isFuture && iso >= effectiveStart && habitOccursOnDate(habit, iso);
-      days.push({ iso, scheduled, status: logMap[iso] || null, isFuture });
-      cursor.setDate(cursor.getDate() + 1);
+    // Índice de logs: { "YYYY-MM-DD": status }
+    const logMap = {};
+    for (const log of logs) {
+      logMap[String(log.date).slice(0, 10)] = log.status;
     }
-    weeks.push(days);
-  }
-  console.log("[HM] weeks:", weeks.length, "habit.days_of_week:", habit.days_of_week, "today:", today, "effectiveStart:", effectiveStart);
-  return weeks;
-  } catch(e) {
+
+    const weeks = [];
+    const cursor = new Date(gridStart);
+    for (let w = 0; w < WEEKS; w++) {
+      const days = [];
+      for (let d = 0; d < 7; d++) {
+        const iso = [
+          cursor.getFullYear(),
+          String(cursor.getMonth() + 1).padStart(2, "0"),
+          String(cursor.getDate()).padStart(2, "0"),
+        ].join("-");
+        const isFuture = iso > today;
+        const scheduled = !isFuture && iso >= effectiveStart && habitOccursOnDate(habit, iso);
+        days.push({ iso, scheduled, status: logMap[iso] || null, isFuture });
+        cursor.setDate(cursor.getDate() + 1);
+      }
+      weeks.push(days);
+    }
+    return weeks;
+  } catch (e) {
     console.error("[Heatmap] buildHeatmapGrid crash:", e.message, e.stack);
     return [];
   }
