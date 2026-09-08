@@ -131,9 +131,16 @@ class HabitStatsOut(BaseModel):
     current_streak: int
     best_streak: int
     total_done: int
-    total_scheduled: int      # días programados desde start_date hasta ayer
-    completion_rate: int       # % (done / scheduled, excluyendo skipped)
-    logs: list[LogOut]         # historial completo, desc por fecha
+    total_scheduled: int
+    completion_rate: int
+    logs: list[LogOut]
+    # Campos de recurrencia necesarios para el heatmap en el frontend
+    days_of_week: str = "0,1,2,3,4,5,6"
+    recurrence_type: str = "weekly"
+    recurrence_interval: Optional[int] = None
+    recurrence_day_of_month: Optional[int] = None
+    start_date: Optional[date] = None
+    created_at: Optional[datetime] = None
 
 
 class WeeklyStat(BaseModel):

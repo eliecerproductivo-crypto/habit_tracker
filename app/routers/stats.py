@@ -378,4 +378,10 @@ def habit_stats(
         total_scheduled=total_scheduled,
         completion_rate=completion_rate,
         logs=logs,
+        days_of_week=habit.days_of_week,
+        recurrence_type=habit.recurrence_type or "weekly",
+        recurrence_interval=habit.recurrence_interval,
+        recurrence_day_of_month=habit.recurrence_day_of_month,
+        start_date=habit.start_date,
+        created_at=habit.created_at,
     )
