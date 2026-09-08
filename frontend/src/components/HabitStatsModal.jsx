@@ -34,6 +34,7 @@ const WEEKS = 14;          // 14 semanas = 98 días de historial
 const DAY_LABELS = ["D", "L", "M", "M", "J", "V", "S"];
 
 function buildHeatmapGrid(habit, logs) {
+  try {
   const today = todayLocalISODate();
 
   // Fecha efectiva de inicio del hábito
@@ -75,6 +76,10 @@ function buildHeatmapGrid(habit, logs) {
     weeks.push(days);
   }
   return weeks;
+  } catch(e) {
+    console.error("[Heatmap] buildHeatmapGrid crash:", e.message, e.stack);
+    return [];
+  }
 }
 
 const CELL = 11;
