@@ -259,7 +259,7 @@ export default function HabitStatsModal({ habit, onClose }) {
                 <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink-faint">
                   Actividad — últimas {WEEKS} semanas
                 </h3>
-                <Heatmap habit={habit} logs={data.logs} />
+                <Heatmap habit={{ ...habit, ...data }} logs={data.logs} />
               </div>
 
               {/* Historial de logs */}
