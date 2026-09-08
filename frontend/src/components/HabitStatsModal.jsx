@@ -36,6 +36,13 @@ const DAY_LABELS = ["D", "L", "M", "M", "J", "V", "S"];
 function buildHeatmapGrid(habit, logs) {
   const today = todayLocalISODate();
 
+  console.log("[Heatmap] habit:", JSON.stringify({
+    id: habit.id, name: habit.name,
+    start_date: habit.start_date, created_at: habit.created_at,
+    days_of_week: habit.days_of_week, recurrence_type: habit.recurrence_type,
+  }));
+  console.log("[Heatmap] logs sample:", logs.slice(0, 3).map(l => ({ date: l.date, status: l.status })));
+
   // Fecha efectiva de inicio del hábito
   const effectiveStart = habit.start_date
     ? String(habit.start_date).slice(0, 10)
