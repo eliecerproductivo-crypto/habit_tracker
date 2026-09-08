@@ -38,8 +38,10 @@ export function useYearHeatmap(habits) {
       // Índice: { "YYYY-MM-DD": { habitId: status } }
       const logMap = {};
       for (const log of res.data) {
-        if (!logMap[log.date]) logMap[log.date] = {};
-        logMap[log.date][log.habit_id] = log.status;
+        // Normalizar a YYYY-MM-DD por si llega con hora
+        const dateKey = String(log.date).slice(0, 10);
+        if (!logMap[dateKey]) logMap[dateKey] = {};
+        logMap[dateKey][log.habit_id] = log.status;
       }
 
       const result = [];
