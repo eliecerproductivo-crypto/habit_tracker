@@ -77,48 +77,78 @@ function buildHeatmapGrid(habit, logs) {
   return weeks;
 }
 
-function cellClass(day) {
-  if (day.isFuture) return "bg-panel-alt opacity-30";
-  if (!day.scheduled) return "bg-panel-alt opacity-20";
-  if (day.status === "done")    return "bg-mint";
-  if (day.status === "skipped") return "bg-signal opacity-70";
-  if (day.status === "failed")  return "bg-coral opacity-80";
-  // programado pero sin log (fallo implícito si ya pasó)
-  return "bg-coral/30";
+const CELL = 11;
+const GAP  = 2;
+const STEP = CELL + GAP;
+
+function cellColor(day, isDark) {
+  if (day.isFuture || !day.scheduled) return isDark ? "#1E2A3E" : "#E3E7F0";
+  if (day.status === "done")          return isDark ? "#34D399" : "#0F9D74";
+  if (day.status === "skipped")       return isDark ? "#F5A623" : "#C97A0E";
+  if (day.status === "failed")        return isDark ? "#FB7185" : "#D6455D";
+  return isDark ? "#4A2030" : "#F5C6CE"; // programado sin log
 }
 
 function Heatmap({ habit, logs }) {
-  const weeks = buildHeatmapGrid(habit, logs);
+  const weeks  = buildHeatmapGrid(habit, logs);
+  const isDark = document.documentElement.classList.contains("dark");
+  const today  = todayLocalISODate();
+
+  const canvasW = weeks.length * STEP - GAP;
+  const canvasH = 7 * STEP - GAP;
+
   return (
     <div className="overflow-x-auto">
-      <div className="flex gap-1 min-w-max">
+      <div className="flex gap-2">
         {/* Etiquetas de días */}
-        <div className="flex flex-col gap-1 mr-1">
+        <div className="flex flex-col justify-between font-mono text-[9px] text-ink-faint select-none shrink-0"
+          style={{ height: canvasH, paddingTop: 1 }}>
           {DAY_LABELS.map((l, i) => (
-            <span key={i} className="flex h-3.5 w-4 items-center text-[9px] font-mono text-ink-faint">
+            <span key={i} style={{ height: CELL, lineHeight: `${CELL}px` }}>
               {i % 2 === 1 ? l : ""}
             </span>
           ))}
         </div>
-        {/* Columnas por semana */}
-        {weeks.map((week, wi) => (
-          <div key={wi} className="flex flex-col gap-1">
-            {week.map((day) => (
-              <div
-                key={day.iso}
-                title={`${formatDateFull(day.iso)}${day.status ? ` — ${day.status}` : day.scheduled ? " — sin registrar" : ""}`}
-                className={`h-3.5 w-3.5 rounded-sm transition-opacity cursor-default ${cellClass(day)}`}
-              />
-            ))}
-          </div>
-        ))}
+        <svg width={canvasW} height={canvasH} style={{ display: "block", overflow: "visible" }}>
+          {weeks.map((week, wi) =>
+            week.map((day, di) => {
+              const x = wi * STEP;
+              const y = di * STEP;
+              const isToday = day.iso === today;
+              return (
+                <g key={day.iso}>
+                  <rect x={x} y={y} width={CELL} height={CELL} rx={2} ry={2}
+                    fill={cellColor(day, isDark)}
+                    opacity={day.isFuture || !day.scheduled ? 0.5 : 1}
+                  >
+                    <title>{formatDateFull(day.iso)}{day.status ? ` — ${day.status}` : day.scheduled ? " — sin registrar" : ""}</title>
+                  </rect>
+                  {isToday && (
+                    <rect x={x + 0.5} y={y + 0.5} width={CELL - 1} height={CELL - 1}
+                      rx={2} ry={2} fill="none"
+                      stroke={isDark ? "#F5A623" : "#C97A0E"} strokeWidth={1.5} />
+                  )}
+                </g>
+              );
+            })
+          )}
+        </svg>
       </div>
       {/* Leyenda */}
       <div className="mt-2 flex flex-wrap gap-3 text-[10px] text-ink-faint">
-        <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-mint inline-block" /> Completado</span>
-        <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-signal opacity-70 inline-block" /> Saltado</span>
-        <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-coral/30 inline-block" /> Sin registrar</span>
-        <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-panel-alt opacity-20 inline-block" /> No programado</span>
+        {[
+          { label: "Completado",    color: isDark ? "#34D399" : "#0F9D74" },
+          { label: "Saltado",       color: isDark ? "#F5A623" : "#C97A0E" },
+          { label: "Sin registrar", color: isDark ? "#4A2030" : "#F5C6CE" },
+          { label: "No programado", color: isDark ? "#1E2A3E" : "#E3E7F0" },
+        ].map(({ label, color }) => (
+          <span key={label} className="flex items-center gap-1">
+            <svg width={CELL} height={CELL}>
+              <rect width={CELL} height={CELL} rx={2} fill={color} />
+            </svg>
+            {label}
+          </span>
+        ))}
       </div>
     </div>
   );
