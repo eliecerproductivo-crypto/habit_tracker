@@ -35,14 +35,25 @@ const DAY_LABELS = ["D", "L", "M", "M", "J", "V", "S"];
 
 function buildHeatmapGrid(habit, logs) {
   const today = todayLocalISODate();
-  // Empezamos en el domingo anterior a la semana más antigua
-  // para que las columnas estén alineadas por semana.
+
+  // Fecha efectiva de inicio del hábito (igual que el backend)
+  const effectiveStart = habit.start_date
+    ? String(habit.start_date).slice(0, 10)
+    : (habit.created_at
+        ? (() => {
+            const raw = habit.created_at;
+            const hasZone = raw.endsWith("Z") || /[+-]\d{2}:\d{2}$/.test(raw);
+            const parsed = new Date(hasZone ? raw : raw + "Z");
+            return isNaN(parsed.getTime()) ? today : parsed.toISOString().slice(0, 10);
+          })()
+        : today);
+
   const todayDate = new Date(today);
   const startOffset = (WEEKS * 7) - 1;
   const raw = new Date(todayDate);
   raw.setDate(raw.getDate() - startOffset);
   // Retroceder hasta el domingo más cercano para alinear columnas
-  const dow = raw.getDay(); // 0=dom
+  const dow = raw.getDay();
   raw.setDate(raw.getDate() - dow);
 
   const logMap = {};
@@ -55,9 +66,14 @@ function buildHeatmapGrid(habit, logs) {
   for (let w = 0; w < WEEKS; w++) {
     const days = [];
     for (let d = 0; d < 7; d++) {
-      const iso = cursor.toISOString().slice(0, 10);
+      // Usar fecha local para evitar desfase de zona horaria
+      const iso = [
+        cursor.getFullYear(),
+        String(cursor.getMonth() + 1).padStart(2, "0"),
+        String(cursor.getDate()).padStart(2, "0"),
+      ].join("-");
       const isFuture = iso > today;
-      const scheduled = !isFuture && habitOccursOnDate(habit, iso);
+      const scheduled = !isFuture && iso >= effectiveStart && habitOccursOnDate(habit, iso);
       const status = logMap[iso] || null;
       days.push({ iso, scheduled, status, isFuture });
       cursor.setDate(cursor.getDate() + 1);
