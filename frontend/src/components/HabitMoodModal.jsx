@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { Check, X, Sparkles } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Check, X } from "lucide-react";
 
 export const MOOD_OPTIONS = [
   { key: "great", emoji: "🤩", label: "Genial" },
@@ -32,6 +33,21 @@ export default function HabitMoodModal({
     }
   }, [isOpen, initialMood, initialNote]);
 
+  // Bloquear scroll del body y cerrar con Escape
+  useEffect(() => {
+    if (!isOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [isOpen, onClose]);
+
   if (!isOpen || !habit) return null;
 
   const statusLabel =
@@ -48,9 +64,15 @@ export default function HabitMoodModal({
     onClose();
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs animate-in fade-in duration-150">
-      <div className="w-full max-w-sm rounded-2xl border border-line bg-panel p-5 shadow-xl animate-in zoom-in-95 duration-150">
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      {/* Backdrop con clic para cerrar */}
+      <div
+        className="fixed inset-0 bg-black/40 backdrop-blur-xs transition-opacity"
+        onClick={handleSkip}
+        aria-hidden="true"
+      />
+      <div className="relative w-full max-w-sm rounded-2xl border border-line bg-panel p-5 shadow-xl animate-in fade-in zoom-in-95 duration-150 overscroll-contain">
         {/* Header */}
         <div className="flex items-start justify-between gap-2">
           <div>
@@ -131,6 +153,7 @@ export default function HabitMoodModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

@@ -5,7 +5,7 @@ import {
   Volume2, VolumeX, Sparkles
 } from "lucide-react";
 import api from "../api/client";
-import { useHabits } from "../hooks/useHabits";
+import { useHabitsContext } from "../context/HabitsContext";
 import { todayLocalISODate } from "../lib/schedule";
 
 // Función utilitaria para reproducir un sonido de campanada agradable con Web Audio API
@@ -91,7 +91,7 @@ const PRESETS = [
 ];
 
 export default function Timer() {
-  const { habits, refresh: refreshHabits } = useHabits();
+  const { habits, refresh: refreshHabits } = useHabitsContext();
 
   // Configuración del timer
   const [selectedHabitId, setSelectedHabitId] = useState("");
@@ -862,3 +862,4 @@ export default function Timer() {
     </div>
   );
 }
+

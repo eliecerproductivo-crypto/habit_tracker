@@ -1,20 +1,28 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import CurrentFocusCard from "../components/CurrentFocusCard";
 import TodayChecklist from "../components/TodayChecklist";
 import StatCard from "../components/StatCard";
 import WildcardWidget from "../components/WildcardWidget";
 import DateNavBar from "../components/DateNavBar";
 import MonthHeatmap from "../components/MonthHeatmap";
-import { useHabits } from "../hooks/useHabits";
+import { useHabitsContext } from "../context/HabitsContext";
+import { useDayLogs } from "../hooks/useDayLogs";
 import { useStats } from "../hooks/useStats";
 import { useWildcard } from "../hooks/useWildcard";
 import { todayLocalISODate, toLocalISODate, habitOccursOnDate } from "../lib/schedule";
 
 export default function Dashboard() {
   const [selectedDate, setSelectedDate] = useState(todayLocalISODate());
-  const { habits: allHabits, completedHabitIds, logsByHabitId, loading, error, setHabitStatus, refresh: refreshHabits } = useHabits(selectedDate);
+  const { habits: allHabits, loading: habitsLoading, refresh: refreshHabits } = useHabitsContext();
+  const { logsByHabitId, completedHabitIds, loading: logsLoading, error, setHabitStatus, refresh: refreshLogs } = useDayLogs(selectedDate);
+  const loading = habitsLoading || logsLoading;
   const { summary, refresh: refreshStats } = useStats();
   const { wildcard, gained, checkMilestone, useWildcardForDate, refresh: refreshWildcard } = useWildcard();
+
+  const activeHabits = useMemo(
+    () => allHabits.filter((h) => h.is_active !== false),
+    [allHabits]
+  );
 
   // Wrapper que actualiza el estado del hábito y luego refresca las stats
   const handleSetStatus = async (habitId, status, extra = {}) => {
@@ -52,6 +60,13 @@ export default function Dashboard() {
   );
   const doneToday = scheduledToday.filter((h) => completedHabitIds.has(h.id)).length;
   const pct = scheduledToday.length ? Math.round((doneToday / scheduledToday.length) * 100) : 0;
+
+  // Estado calculado para hoy en la actividad del año (instantáneo y reactivo)
+  const isAllDoneToday = scheduledToday.length > 0 && scheduledToday.every((h) => {
+    const s = logsByHabitId[h.id]?.status;
+    return s === "done" || s === "skipped";
+  });
+  const todayStatus = scheduledToday.length === 0 ? "empty" : isAllDoneToday ? "complete" : "failed";
 
   return (
     <div className="flex flex-col gap-6">
@@ -107,7 +122,7 @@ export default function Dashboard() {
 
           {/* Heatmap mensual — solo visible en vista de hoy */}
           {isToday && (
-            <MonthHeatmap habits={allHabits.filter((h) => h.is_active !== false)} />
+            <MonthHeatmap habits={activeHabits} todayStatus={todayStatus} />
           )}
 
           <div>
@@ -126,3 +141,4 @@ export default function Dashboard() {
     </div>
   );
 }
+

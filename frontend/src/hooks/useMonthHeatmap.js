@@ -10,26 +10,47 @@ import { habitOccursOnDate, todayLocalISODate, toLocalISODate } from "../lib/sch
  *   "empty"    → ningún hábito programado ese día
  *   "future"   → día aún no ha llegado
  */
+function parseLocalDate(isoDate) {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  return new Date(y, m - 1, d, 12, 0, 0);
+}
+
+function formatLocalDate(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 export function useYearHeatmap(habits) {
   const [days, setDays]       = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState(null);
 
+  // Clave estable para evitar refetches si la referencia del array cambia pero los hábitos son los mismos
+  const habitsKey = habits?.map((h) => `${h.id}-${h.is_active}-${h.days_of_week}`).join("|") || "";
+
   const compute = useCallback(async () => {
     const today = todayLocalISODate();
+    const todayDate = parseLocalDate(today);
 
-    // 12 meses hacia atrás
-    const startDate = new Date(today);
+    // 12 meses hacia atrás (usando mediodía local para evitar desfases de zona horaria)
+    const startDate = new Date(todayDate);
     startDate.setFullYear(startDate.getFullYear() - 1);
     startDate.setDate(startDate.getDate() + 1);
-    const dateFrom = toLocalISODate(startDate);
+    const dateFrom = formatLocalDate(startDate);
 
     if (!habits || habits.length === 0) {
-      setDays(buildEmptyRange(dateFrom, today));
+      setDays(buildEmptyRange(startDate, todayDate));
       return;
     }
 
-    setLoading(true);
+    // Solo activamos loading en la primera carga (cuando aún no hay días dibujados)
+    // para que las actualizaciones posteriores se hagan en segundo plano sin parpadear
+    setDays((prev) => {
+      if (prev.length === 0) setLoading(true);
+      return prev;
+    });
     setError(null);
 
     try {
@@ -46,10 +67,9 @@ export function useYearHeatmap(habits) {
 
       const result = [];
       let cursor = new Date(startDate);
-      const todayDate = new Date(today);
 
       while (cursor <= todayDate) {
-        const iso = toLocalISODate(cursor);
+        const iso = formatLocalDate(cursor);
 
         const scheduled = habits.filter((h) => {
           if (!h.is_active) return false;
@@ -82,19 +102,18 @@ export function useYearHeatmap(habits) {
     } finally {
       setLoading(false);
     }
-  }, [habits]);
+  }, [habitsKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { compute(); }, [compute]);
 
   return { days, loading, error };
 }
 
-function buildEmptyRange(dateFrom, dateTo) {
+function buildEmptyRange(startDate, todayDate) {
   const result = [];
-  const cursor = new Date(dateFrom);
-  const end    = new Date(dateTo);
-  while (cursor <= end) {
-    result.push({ iso: toLocalISODate(cursor), status: "empty" });
+  const cursor = new Date(startDate);
+  while (cursor <= todayDate) {
+    result.push({ iso: formatLocalDate(cursor), status: "empty" });
     cursor.setDate(cursor.getDate() + 1);
   }
   return result;

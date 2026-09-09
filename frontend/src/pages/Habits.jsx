@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Plus } from "lucide-react";
-import { useHabits } from "../hooks/useHabits";
+import { useHabitsContext } from "../context/HabitsContext";
 import HabitCard from "../components/HabitCard";
 import HabitForm from "../components/HabitForm";
 import Modal from "../components/Modal";
@@ -8,7 +8,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import HabitStatsModal from "../components/HabitStatsModal";
 
 export default function Habits() {
-  const { habits, loading, error, createHabit, updateHabit, deleteHabit } = useHabits();
+  const { habits, loading, error, createHabit, updateHabit, deleteHabit } = useHabitsContext();
   const [formOpen, setFormOpen]     = useState(false);
   const [editing, setEditing]       = useState(null);
   const [toDelete, setToDelete]     = useState(null);
@@ -111,3 +111,4 @@ export default function Habits() {
     </div>
   );
 }
+

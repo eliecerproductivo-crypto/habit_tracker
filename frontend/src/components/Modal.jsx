@@ -11,12 +11,15 @@ export default function Modal({ open, onClose, title, children }) {
 
   useEffect(() => {
     if (!open) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     const onKey = (e) => {
       if (e.key === "Escape") handleClose();
     };
     document.addEventListener("keydown", onKey);
     const timeout = setTimeout(() => dialogRef.current?.focus(), 0);
     return () => {
+      document.body.style.overflow = prevOverflow;
       document.removeEventListener("keydown", onKey);
       clearTimeout(timeout);
     };
@@ -37,7 +40,7 @@ export default function Modal({ open, onClose, title, children }) {
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
-        className="relative max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-line bg-panel p-5 shadow-2xl outline-none md:p-6"
+        className="relative max-h-[90vh] w-full max-w-md overflow-y-auto overscroll-contain rounded-2xl border border-line bg-panel p-5 shadow-2xl outline-none md:p-6"
       >
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-lg font-semibold">{title}</h3>

@@ -2,24 +2,24 @@ import { useCallback, useEffect, useState } from "react";
 import api from "../api/client";
 import { todayLocalISODate } from "../lib/schedule";
 
-export function useHabits(date) {
+/**
+ * Fetches only the /logs for a specific date.
+ * Dashboard uses this alongside useHabitsContext() to avoid a duplicate
+ * /habits fetch — habits come from shared context, logs are per-date local.
+ */
+export function useDayLogs(date) {
   const targetDate = date || todayLocalISODate();
 
-  const [habits, setHabits] = useState([]);
-  const [logs,   setLogs]   = useState([]);
+  const [logs, setLogs]       = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error,   setError]   = useState(null);
+  const [error, setError]     = useState(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [habitsRes, logsRes] = await Promise.all([
-        api.get("/habits"),
-        api.get("/logs", { params: { date: targetDate } }),
-      ]);
-      setHabits(habitsRes.data);
-      setLogs(logsRes.data);
+      const res = await api.get("/logs", { params: { date: targetDate } });
+      setLogs(res.data);
     } catch (err) {
       setError(err?.response?.data?.detail || "No se pudo cargar la información.");
     } finally {
@@ -34,32 +34,16 @@ export function useHabits(date) {
     logs.filter((l) => l.status === "done").map((l) => l.habit_id)
   );
 
-  const createHabit = async (payload) => {
-    const res = await api.post("/habits", payload);
-    setHabits((h) => [...h, res.data]);
-    return res.data;
-  };
-
-  const updateHabit = async (id, payload) => {
-    const res = await api.put(`/habits/${id}`, payload);
-    setHabits((h) => h.map((x) => (x.id === id ? res.data : x)));
-    return res.data;
-  };
-
-  const deleteHabit = async (id) => {
-    await api.delete(`/habits/${id}`);
-    setHabits((h) => h.filter((x) => x.id !== id));
-  };
-
   const setHabitStatus = async (habitId, status, extra = {}) => {
     if (status === null) {
       const existing = logsByHabitId[habitId];
       if (!existing) return;
+      // Optimistic remove
       setLogs((prev) => prev.filter((l) => l.habit_id !== habitId));
       try {
         await api.delete(`/logs/${existing.id}`);
       } catch (err) {
-        // Revertir si falla
+        // Revert on failure
         setLogs((prev) => [...prev, existing]);
         throw err;
       }
@@ -74,7 +58,7 @@ export function useHabits(date) {
       ...(extra.note !== undefined ? { note: extra.note } : {}),
     };
 
-    // Actualización optimista
+    // Optimistic update
     const optimistic = {
       ...payload,
       id: logsByHabitId[habitId]?.id ?? `temp_${Date.now()}`,
@@ -91,23 +75,19 @@ export function useHabits(date) {
       ]);
       return res.data;
     } catch (err) {
-      // Revertir si falla
+      // Revert on failure
       setLogs(prevLogs);
       throw err;
     }
   };
 
   return {
-    habits,
     logs,
     logsByHabitId,
     completedHabitIds,
     loading,
     error,
     refresh,
-    createHabit,
-    updateHabit,
-    deleteHabit,
     setHabitStatus,
     toggleToday: (habitId, completed) =>
       setHabitStatus(habitId, completed ? "done" : null),

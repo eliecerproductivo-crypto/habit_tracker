@@ -102,8 +102,11 @@ function EntryCard({ entry, onDelete }) {
 
   return (
     <div className="rounded-xl border border-line bg-panel overflow-hidden">
-      <button
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setOpen((o) => !o); }}
         className="flex w-full items-center justify-between px-4 py-3 text-left cursor-pointer hover:bg-panel-alt transition-colors"
       >
         <p className="text-sm font-medium text-ink capitalize">{formatDate(entry.entry_date)}</p>
@@ -116,7 +119,7 @@ function EntryCard({ entry, onDelete }) {
           </button>
           {open ? <ChevronUp size={15} className="text-ink-faint" /> : <ChevronDown size={15} className="text-ink-faint" />}
         </div>
-      </button>
+      </div>
 
       {open && (
         <div className="border-t border-line px-4 py-3">

@@ -92,16 +92,11 @@ export default function TodayChecklist({ habits, logsByHabitId = {}, onSetStatus
               key={habit.id}
               className="flex items-center gap-3 px-4 py-3.5 hover:bg-panel-alt/30 transition-colors"
             >
-              {/* Zona izquierda clickeable → stats (toda la fila excepto los botones de estado) */}
-              <button
-                type="button"
-                onClick={() => setStatsHabit(habit)}
-                title={`Ver estadísticas de ${habit.name}`}
-                className="flex min-w-0 flex-1 items-center gap-3 text-left cursor-pointer group"
-              >
+              {/* Contenido del hábito (icono + nombre + hora + chip de ánimo) */}
+              <div className="flex min-w-0 flex-1 items-center gap-3">
                 {/* Category icon */}
                 <span
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-opacity group-hover:opacity-70"
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
                   style={{ backgroundColor: `var(--${meta.token}-soft)`, color: `var(--${meta.token})` }}
                 >
                   <Icon size={15} />
@@ -123,9 +118,9 @@ export default function TodayChecklist({ habits, logsByHabitId = {}, onSetStatus
 
                     {/* Chip de Ánimo si ya fue registrado */}
                     {(currentMood || hasNote) && (
-                      <span
-                        onClick={(e) => {
-                          e.stopPropagation(); // no abrir stats, abrir mood
+                      <button
+                        type="button"
+                        onClick={() => {
                           setPendingStatus(currentStatus || "done");
                           setMoodModalHabit(habit);
                         }}
@@ -137,7 +132,7 @@ export default function TodayChecklist({ habits, logsByHabitId = {}, onSetStatus
                         <span className="text-[10px] font-medium text-ink-soft truncate max-w-[120px]">
                           {log?.note || currentMood?.label}
                         </span>
-                      </span>
+                      </button>
                     )}
                   </div>
 
@@ -149,40 +144,47 @@ export default function TodayChecklist({ habits, logsByHabitId = {}, onSetStatus
                     <p className="text-xs text-ink-faint">{habit.duration_minutes} min</p>
                   ) : null}
                 </div>
+              </div>
 
-                {/* Botón stats — visible solo en desktop */}
-                <BarChart2
-                  size={15}
-                  className="hidden md:block shrink-0 text-ink-faint opacity-0 group-hover:opacity-100 transition-opacity"
-                />
-              </button>
+              {/* Acciones: botón de estadísticas + botones de estado */}
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setStatsHabit(habit)}
+                  aria-label={`Ver estadísticas de ${habit.name}`}
+                  title={`Ver estadísticas de ${habit.name}`}
+                  className="flex h-7 w-7 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-violet-soft hover:text-violet cursor-pointer"
+                >
+                  <BarChart2 size={15} />
+                </button>
 
-              {/* Status buttons — ocultos en fechas futuras */}
-              {!isFuture && (
-                <div className="flex shrink-0 gap-1">
-                  {Object.entries(STATUS_CONFIG).map(([statusKey, cfg]) => {
-                    const BtnIcon = cfg.icon;
-                    const isActive = currentStatus === statusKey;
+                {/* Status buttons — ocultos en fechas futuras */}
+                {!isFuture && (
+                  <div className="flex shrink-0 gap-1">
+                    {Object.entries(STATUS_CONFIG).map(([statusKey, cfg]) => {
+                      const BtnIcon = cfg.icon;
+                      const isActive = currentStatus === statusKey;
 
-                    return (
-                      <button
-                        key={statusKey}
-                        onClick={() => handleButtonClick(habit, statusKey, isActive)}
-                        aria-label={cfg.label}
-                        title={cfg.label}
-                        className={[
-                          "flex h-7 w-7 items-center justify-center rounded-full border-2 transition-colors cursor-pointer",
-                          isActive
-                            ? `${cfg.activeClass}`
-                            : `border-line text-transparent ${cfg.hoverClass}`,
-                        ].join(" ")}
-                      >
-                        <BtnIcon size={13} strokeWidth={2.5} />
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+                      return (
+                        <button
+                          key={statusKey}
+                          onClick={() => handleButtonClick(habit, statusKey, isActive)}
+                          aria-label={cfg.label}
+                          title={cfg.label}
+                          className={[
+                            "flex h-7 w-7 items-center justify-center rounded-full border-2 transition-colors cursor-pointer",
+                            isActive
+                              ? `${cfg.activeClass}`
+                              : `border-line text-transparent ${cfg.hoverClass}`,
+                          ].join(" ")}
+                        >
+                          <BtnIcon size={13} strokeWidth={2.5} />
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </li>
           );
         })}

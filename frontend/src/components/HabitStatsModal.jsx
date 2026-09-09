@@ -1,4 +1,6 @@
-import { X, Flame, Trophy, CheckCircle2, Calendar, ChevronRight } from "lucide-react";
+import { useEffect } from "react";
+import { createPortal } from "react-dom";
+import { X, Flame, Trophy, CheckCircle2, Calendar } from "lucide-react";
 import { useHabitStats } from "../hooks/useHabitStats";
 import { categoryMeta } from "../lib/categories";
 import { habitOccursOnDate, todayLocalISODate, toLocalISODate } from "../lib/schedule";
@@ -31,7 +33,7 @@ function formatDateFull(isoDate) {
 // Muestra las últimas WEEKS semanas (cols) × 7 días (filas).
 // Las columnas van de la más antigua (izq) a la más reciente (der).
 const WEEKS = 14;          // 14 semanas = 98 días de historial
-const DAY_LABELS = ["D", "L", "M", "M", "J", "V", "S"];
+const DAY_LABELS = ["L", "M", "X", "J", "V", "S", "D"];
 
 function buildHeatmapGrid(habit, logs) {
   try {
@@ -47,14 +49,15 @@ function buildHeatmapGrid(habit, logs) {
           return isNaN(parsed.getTime()) ? today : toLocalISODate(parsed);
         })();
 
-    // Domingo de la semana actual (usando fecha local para evitar desfases UTC)
+    // Lunes de la semana actual (usando fecha local para evitar desfases UTC)
     const [ty, tm, td] = today.split("-").map(Number);
     const todayDate = new Date(ty, tm - 1, td);
-    const currentWeekSunday = new Date(todayDate);
-    currentWeekSunday.setDate(currentWeekSunday.getDate() - currentWeekSunday.getDay());
+    const currentWeekMonday = new Date(todayDate);
+    const dayOfWeek = (currentWeekMonday.getDay() + 6) % 7; // 0=lun, 6=dom
+    currentWeekMonday.setDate(currentWeekMonday.getDate() - dayOfWeek);
 
-    // Domingo de hace (WEEKS - 1) semanas para que la última columna sea la semana actual
-    const gridStart = new Date(currentWeekSunday);
+    // Lunes de hace (WEEKS - 1) semanas para que la última columna sea la semana actual
+    const gridStart = new Date(currentWeekMonday);
     gridStart.setDate(gridStart.getDate() - (WEEKS - 1) * 7);
 
     // Índice de logs: { "YYYY-MM-DD": status }
@@ -111,11 +114,21 @@ function Heatmap({ habit, logs }) {
     <div className="overflow-x-auto">
       <div className="flex gap-2">
         {/* Etiquetas de días */}
-        <div className="flex flex-col justify-between font-mono text-[9px] text-ink-faint select-none shrink-0"
-          style={{ height: canvasH, paddingTop: 1 }}>
+        <div
+          className="flex flex-col font-mono text-[9px] text-ink-faint select-none shrink-0"
+          style={{ width: 14 }}
+        >
           {DAY_LABELS.map((l, i) => (
-            <span key={i} style={{ height: CELL, lineHeight: `${CELL}px` }}>
-              {i % 2 === 1 ? l : ""}
+            <span
+              key={i}
+              style={{
+                height: CELL,
+                marginBottom: i < 6 ? GAP : 0,
+                lineHeight: `${CELL}px`,
+              }}
+              className="flex items-center text-[9px]"
+            >
+              {l}
             </span>
           ))}
         </div>
@@ -218,11 +231,32 @@ export default function HabitStatsModal({ habit, onClose }) {
   const meta = categoryMeta(habit?.category);
   const Icon = meta.icon;
 
+  // Bloquear scroll del fondo y cerrar con Escape
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
   if (!habit) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 md:items-center md:p-4">
-      <div className="flex w-full max-w-2xl flex-col rounded-t-2xl border border-line bg-panel shadow-2xl md:rounded-2xl max-h-[90dvh]">
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-end justify-center p-0 md:items-center md:p-4">
+      {/* Backdrop con clic para cerrar */}
+      <div
+        className="fixed inset-0 bg-black/50 backdrop-blur-xs transition-opacity"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+
+      <div className="relative flex w-full max-w-2xl flex-col rounded-t-2xl border border-line bg-panel shadow-2xl md:rounded-2xl max-h-[85vh] min-h-[300px] animate-in fade-in zoom-in-95 duration-150">
 
         {/* Header */}
         <div className="flex shrink-0 items-center gap-3 border-b border-line px-5 py-4">
@@ -244,11 +278,14 @@ export default function HabitStatsModal({ habit, onClose }) {
           </button>
         </div>
 
-        {/* Body — scrollable */}
-        <div className="flex-1 overflow-y-auto px-5 py-5 space-y-6">
+        {/* Body — scrollable con contención de scroll */}
+        <div className="flex-1 overflow-y-auto px-5 py-5 space-y-6 overscroll-contain">
 
           {loading && (
-            <p className="text-sm text-ink-soft text-center py-8">Cargando estadísticas…</p>
+            <div className="flex flex-col items-center justify-center py-16 gap-2.5 text-ink-soft">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-signal border-t-transparent" />
+              <p className="text-xs font-medium">Cargando estadísticas…</p>
+            </div>
           )}
           {error && (
             <p className="rounded-xl bg-coral-soft px-4 py-3 text-sm text-coral">{error}</p>
@@ -305,6 +342,7 @@ export default function HabitStatsModal({ habit, onClose }) {
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
