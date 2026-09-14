@@ -91,12 +91,23 @@ def create_timer_session(
 
 @router.get("/stats", response_model=schemas.TimerStatsOut)
 def get_timer_stats(
+    client_date: Optional[str] = Query(default=None, description="Fecha local del cliente YYYY-MM-DD"),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
     now_utc = datetime.now(timezone.utc)
-    start_of_today = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
     seven_days_ago = now_utc - timedelta(days=7)
+    
+    # Si el cliente pasa su fecha local, la usamos; de lo contrario usamos la fecha UTC actual
+    from datetime import date as date_type
+    target_today = None
+    if client_date:
+        try:
+            target_today = date_type.fromisoformat(client_date)
+        except Exception:
+            target_today = None
+    if target_today is None:
+        target_today = now_utc.date()
 
     all_sessions = (
         db.query(models.TimerSession)
@@ -120,7 +131,7 @@ def get_timer_stats(
         if st.tzinfo is None:
             st = st.replace(tzinfo=timezone.utc)
 
-        if st >= start_of_today:
+        if st.date() == target_today:
             today_seconds += dur
             today_sessions_count += 1
 

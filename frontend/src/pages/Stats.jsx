@@ -12,6 +12,7 @@ import StatCard from "../components/StatCard";
 import WildcardWidget from "../components/WildcardWidget";
 import HabitStatsModal from "../components/HabitStatsModal";
 import { categoryMeta } from "../lib/categories";
+import { useTheme } from "../context/ThemeContext";
 
 function tokenToHex(token, isDark) {
   const map = isDark
@@ -141,7 +142,8 @@ export default function Stats() {
   const { wildcard, gained, useWildcardForDate }        = useWildcard();
   const [tab, setTab]           = useState("general");   // "general" | "habitos"
   const [selectedHabit, setSelectedHabit] = useState(null);
-  const isDark = document.documentElement.classList.contains("dark");
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
 
   useEffect(() => {
     if (location.pathname === "/estadisticas") {

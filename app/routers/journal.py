@@ -167,6 +167,19 @@ def _summarize_all_pending_bg(user_id: int):
             return  # Nada pendiente, sin llamadas a la IA
 
         for entry in pending:
+            # Verificar que no exista ya un resumen para evitar duplicados concurrentes
+            already_exists = (
+                db.query(models.JournalSummary)
+                .filter(
+                    models.JournalSummary.user_id == user_id,
+                    models.JournalSummary.date_from == entry.entry_date,
+                    models.JournalSummary.date_to == entry.entry_date,
+                )
+                .first()
+            )
+            if already_exists:
+                continue
+
             summary_text = summarize_entries(f"[{entry.entry_date}] {entry.content}")
             if not summary_text:
                 logger.warning("AI summarization returned None for entry %d", entry.id)
@@ -456,6 +469,29 @@ def chat(
             status_es = "Completado" if log.status == "done" else ("Omitido" if log.status == "skipped" else "Fallido")
             habit_notes_lines.append(f"  • [{log.date}] {habit_name} ({status_es}){mood_str}{note_str}")
 
+    # ── 5.6 Sesiones de enfoque (Timer / Pomodoro) condensadas ────────────────
+    seven_days_ago_dt = datetime.now(timezone.utc) - timedelta(days=7)
+    timer_sessions = (
+        db.query(models.TimerSession)
+        .filter(
+            models.TimerSession.user_id == current_user.id,
+            models.TimerSession.start_time >= seven_days_ago_dt,
+        )
+        .all()
+    )
+    timer_summary = None
+    if timer_sessions:
+        total_focus_sec = sum(s.duration_seconds or 0 for s in timer_sessions)
+        total_hours = round(total_focus_sec / 3600, 1)
+        # Agrupar por hábito para formato ultra-breve (ahorro de tokens)
+        by_habit: dict[str, int] = {}
+        for s in timer_sessions:
+            name = s.habit.name if s.habit else "General"
+            by_habit[name] = by_habit.get(name, 0) + (s.duration_seconds or 0)
+        sorted_habits = sorted(by_habit.items(), key=lambda x: x[1], reverse=True)[:3]
+        habits_part = ", ".join(f"{name}: {round(sec/3600, 1)}h" for name, sec in sorted_habits)
+        timer_summary = f"Últimos 7 días: {total_hours}h de enfoque en total ({habits_part})."
+
     # ── 6. Estadísticas ───────────────────────────────────────────────────────
     from app.routers.stats import compute_user_stats
     user_stats = compute_user_stats(db, current_user)
@@ -473,6 +509,7 @@ def chat(
         habits_text="\n".join(habits_lines) if habits_lines else "Sin hábitos registrados.",
         recent_notes=recent_notes_lines,
         habit_notes=habit_notes_lines,
+        timer_summary=timer_summary,
         stats={
             "dias_en_app": days_in_app,
             "racha_actual": user_stats.current_streak,

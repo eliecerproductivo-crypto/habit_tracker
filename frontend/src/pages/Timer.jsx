@@ -134,7 +134,7 @@ export default function Timer() {
     try {
       const [sessionsRes, statsRes] = await Promise.all([
         api.get("/timer/sessions", { params: { limit: 20 } }),
-        api.get("/timer/stats"),
+        api.get("/timer/stats", { params: { client_date: todayLocalISODate() } }),
       ]);
       setSessions(sessionsRes.data);
       setStats(statsRes.data);

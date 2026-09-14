@@ -33,7 +33,7 @@ def _load_api_keys() -> list[str]:
 
 GEMINI_API_KEYS: list[str] = _load_api_keys()
 
-MODEL = "gemini-3.5-flash-lite"
+MODEL = "gemini-flash-lite-latest"
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 MAX_RETRIES = 3
@@ -168,16 +168,20 @@ def chat_with_context(
     bio_summary: str | None = None,
     recent_notes: list[str] | None = None,
     habit_notes: list[str] | None = None,
+    timer_summary: str | None = None,
 ) -> Optional[str]:
     """
     Responde al usuario usando perfil personal, hábitos, estadísticas,
-    notas recientes, notas de hábitos y resúmenes del diario como contexto.
+    sesiones de enfoque (timer), notas recientes, notas de hábitos y resúmenes del diario como contexto.
     """
     # ── Perfil ────────────────────────────────────────────────────────────────
     bio_block = f"\n\nQUIÉN SOY (perfil del usuario):\n{bio_summary}" if bio_summary else ""
 
     # ── Hábitos ───────────────────────────────────────────────────────────────
     habits_block = f"\n\nHÁBITOS ACTIVOS:\n{habits_text}" if habits_text else ""
+
+    # ── Tiempo de enfoque (Timer / Pomodoro) ───────────────────────────────────
+    timer_block = f"\n\nTIEMPO DEDICADO Y ENFOQUE:\n{timer_summary}" if timer_summary else ""
 
     # ── Estadísticas ──────────────────────────────────────────────────────────
     stats_block = ""
@@ -219,7 +223,7 @@ def chat_with_context(
     system_prompt = (
         "Eres un coach personal de hábitos y productividad. "
         "Tu objetivo es ayudar al usuario a entender sus patrones, mejorar su rutina y superar bloqueos. "
-        "Usa el contexto completo (perfil, hábitos, estadísticas, notas recientes, sensaciones de hábitos y diario) "
+        "Usa el contexto completo (perfil, hábitos, estadísticas, tiempo de enfoque, notas recientes, sensaciones de hábitos y diario) "
         "para dar respuestas personalizadas y concretas. "
         "Responde siempre en español, de forma empática pero directa. "
         "Sé conciso: cada palabra debe aportar valor. Elimina relleno, repeticiones y frases obvias. "
@@ -238,6 +242,7 @@ def chat_with_context(
         f"{habit_notes_block}"
         f"{bio_block}"
         f"{habits_block}"
+        f"{timer_block}"
         f"{stats_block}"
     )
 
