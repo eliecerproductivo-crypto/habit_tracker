@@ -158,7 +158,7 @@ export default function Timer() {
         setRemainingSeconds((prev) => {
           if (prev <= 1) {
             clearInterval(timerRef.current);
-            handleTimerComplete();
+            setTimeout(() => handleTimerComplete(), 0);
             return 0;
           }
           return prev - 1;
@@ -282,9 +282,8 @@ export default function Timer() {
 
       // Recargar datos y resetear
       await loadHistoryAndStats();
-      if (autoMarkDone && sessionToSave.habit_id) {
-        refreshHabits();
-      }
+      refreshHabits();
+      window.dispatchEvent(new CustomEvent("habits-updated"));
 
       setSaveModalOpen(false);
       setSessionToSave(null);

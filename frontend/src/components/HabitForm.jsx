@@ -154,6 +154,7 @@ function CategorySelect({ value, onChange }) {
 
 // ── Main form ─────────────────────────────────────────────────────────────────
 export default function HabitForm({ initial, onSubmit, onCancel, submitLabel = "Guardar hábito" }) {
+  const hasLogs = Boolean(initial?.has_logs);
   const [form, setForm] = useState(() => {
     if (!initial) return EMPTY;
     return {
@@ -365,16 +366,28 @@ export default function HabitForm({ initial, onSubmit, onCancel, submitLabel = "
         <label className="mb-1 block text-xs font-medium text-ink-soft">
           Fecha de inicio <span className="text-ink-faint">(opcional)</span>
         </label>
-        <input type="date" className={inputClass} value={form.start_date}
-          onChange={(e) => set("start_date", e.target.value)} />
-        {form.start_date && (
+        <input
+          type="date"
+          className={[
+            inputClass,
+            hasLogs ? "opacity-60 cursor-not-allowed bg-panel-alt" : "",
+          ].filter(Boolean).join(" ")}
+          value={form.start_date}
+          disabled={hasLogs}
+          onChange={(e) => set("start_date", e.target.value)}
+        />
+        {!hasLogs && form.start_date && (
           <button type="button" onClick={() => set("start_date", "")}
             className="mt-1 text-xs text-ink-faint hover:text-coral cursor-pointer">
             Quitar fecha de inicio
           </button>
         )}
         <p className="mt-1 text-xs text-ink-faint">
-          {form.recurrence_type === "interval" ? "Marca el primer día del ciclo." : "Si no pones fecha, el hábito empieza hoy."}
+          {hasLogs
+            ? "No se puede cambiar la fecha de inicio porque ya existen registros de cumplimiento para este hábito."
+            : form.recurrence_type === "interval"
+            ? "Marca el primer día del ciclo."
+            : "Si no pones fecha, el hábito empieza hoy."}
         </p>
       </div>
 

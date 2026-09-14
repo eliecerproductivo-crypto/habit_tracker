@@ -1,4 +1,5 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { useLocation } from "react-router-dom";
 import CurrentFocusCard from "../components/CurrentFocusCard";
 import TodayChecklist from "../components/TodayChecklist";
 import StatCard from "../components/StatCard";
@@ -12,12 +13,36 @@ import { useWildcard } from "../hooks/useWildcard";
 import { todayLocalISODate, toLocalISODate, habitOccursOnDate } from "../lib/schedule";
 
 export default function Dashboard() {
+  const location = useLocation();
   const [selectedDate, setSelectedDate] = useState(todayLocalISODate());
   const { habits: allHabits, loading: habitsLoading, refresh: refreshHabits } = useHabitsContext();
   const { logsByHabitId, completedHabitIds, loading: logsLoading, error, setHabitStatus, refresh: refreshLogs } = useDayLogs(selectedDate);
   const loading = habitsLoading || logsLoading;
   const { summary, refresh: refreshStats } = useStats();
   const { wildcard, gained, checkMilestone, useWildcardForDate, refresh: refreshWildcard } = useWildcard();
+
+  // Sincronizar logs y estadisticas al volver a Dashboard o recibir eventos de actualizacion
+  useEffect(() => {
+    if (location.pathname === "/") {
+      refreshLogs();
+      refreshStats();
+      refreshHabits();
+    }
+  }, [location.pathname, refreshLogs, refreshStats, refreshHabits]);
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      refreshLogs();
+      refreshStats();
+      refreshHabits();
+    };
+    window.addEventListener("habits-updated", handleUpdate);
+    window.addEventListener("focus", handleUpdate);
+    return () => {
+      window.removeEventListener("habits-updated", handleUpdate);
+      window.removeEventListener("focus", handleUpdate);
+    };
+  }, [refreshLogs, refreshStats, refreshHabits]);
 
   const activeHabits = useMemo(
     () => allHabits.filter((h) => h.is_active !== false),

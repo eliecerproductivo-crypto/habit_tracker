@@ -76,6 +76,16 @@ class Habit(Base):
     logs = relationship("HabitLog", back_populates="habit", cascade="all, delete-orphan")
     timer_sessions = relationship("TimerSession", back_populates="habit", cascade="all, delete-orphan")
 
+    @property
+    def has_logs(self) -> bool:
+        if "_has_logs" in self.__dict__:
+            return self.__dict__["_has_logs"]
+        return bool(self.logs)
+
+    @has_logs.setter
+    def has_logs(self, value: bool):
+        self.__dict__["_has_logs"] = bool(value)
+
 
 class HabitLog(Base):
     __tablename__ = "habit_logs"

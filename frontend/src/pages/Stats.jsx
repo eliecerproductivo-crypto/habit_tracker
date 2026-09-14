@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useLocation } from "react-router-dom";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, PieChart, Pie, Cell, Legend,
@@ -135,11 +136,28 @@ function TabHabitos({ onSelect }) {
 
 // ── Página principal ──────────────────────────────────────────────────────────
 export default function Stats() {
-  const { summary, weekly, byCategory, loading, error } = useStats();
+  const location = useLocation();
+  const { summary, weekly, byCategory, loading, error, refresh } = useStats();
   const { wildcard, gained, useWildcardForDate }        = useWildcard();
   const [tab, setTab]           = useState("general");   // "general" | "habitos"
   const [selectedHabit, setSelectedHabit] = useState(null);
   const isDark = document.documentElement.classList.contains("dark");
+
+  useEffect(() => {
+    if (location.pathname === "/estadisticas") {
+      refresh();
+    }
+  }, [location.pathname, refresh]);
+
+  useEffect(() => {
+    const handleUpdate = () => refresh();
+    window.addEventListener("habits-updated", handleUpdate);
+    window.addEventListener("focus", handleUpdate);
+    return () => {
+      window.removeEventListener("habits-updated", handleUpdate);
+      window.removeEventListener("focus", handleUpdate);
+    };
+  }, [refresh]);
 
   if (loading) return <p className="text-sm text-ink-soft">Cargando estadísticas…</p>;
   if (error)   return <p className="rounded-lg bg-coral-soft px-4 py-3 text-sm text-coral">{error}</p>;

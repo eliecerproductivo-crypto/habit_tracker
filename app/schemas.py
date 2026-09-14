@@ -77,6 +77,7 @@ class HabitOut(HabitBase):
     recurrence_type: str = "weekly"
     recurrence_interval: Optional[int] = None
     recurrence_day_of_month: Optional[int] = None
+    has_logs: bool = False
 
     class Config:
         from_attributes = True

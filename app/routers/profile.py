@@ -74,7 +74,7 @@ def summarize_profile(
     current_user: models.User = Depends(get_current_user),
 ):
     """
-    Genera un resumen comprimido de la bio usando IA.
+    Genera un resumen de la bio usando IA.
     Solo extrae lo relevante para dar contexto al coach.
     """
     from app.ai import summarize_bio
