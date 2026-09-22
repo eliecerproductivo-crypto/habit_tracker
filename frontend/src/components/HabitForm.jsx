@@ -16,12 +16,14 @@ const EMPTY = {
   recurrence_type: "weekly",
   recurrence_interval: 2,
   recurrence_day_of_month: 1,
+  recurrence_times_per_week: 3,
 };
 
 const RECURRENCE_LABELS = {
-  weekly:   "Días de la semana",
-  interval: "Cada N días",
-  monthly:  "Día del mes",
+  weekly:        "Días fijos",
+  weekly_times:  "X veces/semana",
+  interval:      "Cada N días",
+  monthly:       "Día del mes",
 };
 
 // ── Category dropdown ─────────────────────────────────────────────────────────
@@ -169,6 +171,7 @@ export default function HabitForm({ initial, onSubmit, onCancel, submitLabel = "
       recurrence_type: initial.recurrence_type || "weekly",
       recurrence_interval: initial.recurrence_interval || 2,
       recurrence_day_of_month: initial.recurrence_day_of_month || 1,
+      recurrence_times_per_week: initial.recurrence_times_per_week || 3,
     };
   });
   const [error, setError] = useState("");
@@ -193,6 +196,9 @@ export default function HabitForm({ initial, onSubmit, onCancel, submitLabel = "
     if (form.recurrence_type === "weekly" && form.days_of_week.length === 0) {
       setError("Selecciona al menos un día."); return;
     }
+    if (form.recurrence_type === "weekly_times" && (!form.recurrence_times_per_week || form.recurrence_times_per_week < 1)) {
+      setError("Indica cuántas veces por semana quieres hacer el hábito."); return;
+    }
     if (form.recurrence_type === "interval" && (!form.recurrence_interval || form.recurrence_interval < 1)) {
       setError("El intervalo debe ser al menos 1 día."); return;
     }
@@ -209,6 +215,7 @@ export default function HabitForm({ initial, onSubmit, onCancel, submitLabel = "
         days_of_week: form.recurrence_type === "weekly" ? form.days_of_week.join(",") : "0",
         recurrence_interval: form.recurrence_type === "interval" ? Number(form.recurrence_interval) : null,
         recurrence_day_of_month: form.recurrence_type === "monthly" ? Number(form.recurrence_day_of_month) : null,
+        recurrence_times_per_week: form.recurrence_type === "weekly_times" ? Number(form.recurrence_times_per_week) : null,
         start_date: form.start_date || null,
       });
     } catch (err) {
@@ -325,6 +332,32 @@ export default function HabitForm({ initial, onSubmit, onCancel, submitLabel = "
         </div>
       )}
 
+      {form.recurrence_type === "weekly_times" && (
+        <div>
+          <label className="mb-1 block text-xs font-medium text-ink-soft">Veces por semana</label>
+          <div className="flex gap-1.5">
+            {[1, 2, 3, 4, 5, 6, 7].map((n) => (
+              <button
+                key={n}
+                type="button"
+                onClick={() => set("recurrence_times_per_week", n)}
+                className={[
+                  "h-9 flex-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer",
+                  form.recurrence_times_per_week === n
+                    ? "bg-signal text-panel"
+                    : "bg-panel-alt text-ink-faint hover:text-ink-soft",
+                ].join(" ")}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1.5 text-xs text-ink-faint">
+            El hábito aparecerá cada día hasta que lo completes {form.recurrence_times_per_week} {form.recurrence_times_per_week === 1 ? "vez" : "veces"} en la semana.
+          </p>
+        </div>
+      )}
+
       {form.recurrence_type === "interval" && (
         <div>
           <label className="mb-1 block text-xs font-medium text-ink-soft">Repetir cada cuántos días</label>
@@ -387,6 +420,8 @@ export default function HabitForm({ initial, onSubmit, onCancel, submitLabel = "
             ? "No se puede cambiar la fecha de inicio porque ya existen registros de cumplimiento para este hábito."
             : form.recurrence_type === "interval"
             ? "Marca el primer día del ciclo."
+            : form.recurrence_type === "weekly_times"
+            ? "Si no pones fecha, el hábito empieza esta semana."
             : "Si no pones fecha, el hábito empieza hoy."}
         </p>
       </div>

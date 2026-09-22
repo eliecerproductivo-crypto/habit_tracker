@@ -16,7 +16,7 @@ export default function Dashboard() {
   const location = useLocation();
   const [selectedDate, setSelectedDate] = useState(todayLocalISODate());
   const { habits: allHabits, loading: habitsLoading, refresh: refreshHabits } = useHabitsContext();
-  const { logsByHabitId, completedHabitIds, loading: logsLoading, error, setHabitStatus, refresh: refreshLogs } = useDayLogs(selectedDate);
+  const { logsByHabitId, weekLogsByHabitId, completedHabitIds, loading: logsLoading, error, setHabitStatus, refresh: refreshLogs } = useDayLogs(selectedDate);
   const loading = habitsLoading || logsLoading;
   const { summary, refresh: refreshStats } = useStats();
   const { wildcard, gained, checkMilestone, useWildcardForDate, refresh: refreshWildcard } = useWildcard();
@@ -157,6 +157,7 @@ export default function Dashboard() {
             <TodayChecklist
               habits={habits}
               logsByHabitId={logsByHabitId}
+              weekLogsByHabitId={weekLogsByHabitId}
               onSetStatus={handleSetStatus}
               date={selectedDate}
             />

@@ -62,12 +62,14 @@ class Habit(Base):
 
     is_active = Column(Boolean, default=True, nullable=False)
     start_date = Column(Date, nullable=True, default=None)
-    # recurrence_type: "weekly" | "interval" | "monthly"
-    recurrence_type = Column(String(10), nullable=False, default="weekly")
+    # recurrence_type: "weekly" | "interval" | "monthly" | "weekly_times"
+    recurrence_type = Column(String(14), nullable=False, default="weekly")
     # interval: repeat every N days (used when recurrence_type="interval")
     recurrence_interval = Column(Integer, nullable=True, default=None)
     # day_of_month: 1-28 or -1 for last day (used when recurrence_type="monthly")
     recurrence_day_of_month = Column(Integer, nullable=True, default=None)
+    # times_per_week: how many times per week the habit must be done (used when recurrence_type="weekly_times")
+    recurrence_times_per_week = Column(Integer, nullable=True, default=None)
     # duration in minutes for habits without a fixed time (e.g. "study 30 min any time")
     duration_minutes = Column(Integer, nullable=True, default=None)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

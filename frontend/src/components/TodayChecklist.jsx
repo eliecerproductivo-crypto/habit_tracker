@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Check, X, MinusCircle, MessageSquare, BarChart2 } from "lucide-react";
 import { categoryMeta } from "../lib/categories";
-import { formatTime, toMinutes, todayLocalISODate, habitOccursOnDate } from "../lib/schedule";
+import { formatTime, toMinutes, todayLocalISODate, habitOccursOnDate, weekDatesOf } from "../lib/schedule";
 import HabitMoodModal, { getMoodInfo } from "./HabitMoodModal";
 import HabitStatsModal from "./HabitStatsModal";
 
@@ -26,7 +26,7 @@ const STATUS_CONFIG = {
   },
 };
 
-export default function TodayChecklist({ habits, logsByHabitId = {}, onSetStatus, date }) {
+export default function TodayChecklist({ habits, logsByHabitId = {}, weekLogsByHabitId = {}, onSetStatus, date }) {
   const resolvedDate = date || todayLocalISODate();
   const isFuture = resolvedDate > todayLocalISODate();
 
@@ -35,8 +35,26 @@ export default function TodayChecklist({ habits, logsByHabitId = {}, onSetStatus
   const [pendingStatus, setPendingStatus]   = useState("done");
   const [statsHabit, setStatsHabit]         = useState(null);
 
+  // Mon–Sun dates of the resolved week (for weekly_times quota tracking)
+  const weekDates = weekDatesOf(resolvedDate);
+
+  // Build the Set of "done" dates this week for a given weekly_times habit.
+  function completedDatesInWeekForHabit(habit) {
+    if ((habit.recurrence_type || "weekly") !== "weekly_times") return null;
+    const byDate = weekLogsByHabitId[habit.id] || {};
+    const done = new Set();
+    for (const iso of weekDates) {
+      if (byDate[iso]?.status === "done") done.add(iso);
+    }
+    return done;
+  }
+
   const todays = habits
-    .filter((h) => h.is_active !== false && habitOccursOnDate(h, resolvedDate))
+    .filter((h) => {
+      if (h.is_active === false) return false;
+      const completedSet = completedDatesInWeekForHabit(h);
+      return habitOccursOnDate(h, resolvedDate, completedSet);
+    })
     .sort((a, b) => {
       const aMin = toMinutes(a.start_time);
       const bMin = toMinutes(b.start_time);
@@ -143,6 +161,21 @@ export default function TodayChecklist({ habits, logsByHabitId = {}, onSetStatus
                   ) : habit.duration_minutes ? (
                     <p className="text-xs text-ink-faint">{habit.duration_minutes} min</p>
                   ) : null}
+
+                  {/* Weekly progress badge for weekly_times habits */}
+                  {habit.recurrence_type === "weekly_times" && (() => {
+                    const target = habit.recurrence_times_per_week ?? 1;
+                    const byDate = weekLogsByHabitId[habit.id] || {};
+                    const doneCount = weekDates.filter((iso) => byDate[iso]?.status === "done").length;
+                    return (
+                      <p className="text-xs text-ink-faint">
+                        <span className={doneCount >= target ? "text-mint font-semibold" : ""}>
+                          {doneCount}/{target}
+                        </span>
+                        {" "}esta semana
+                      </p>
+                    );
+                  })()}
                 </div>
               </div>
 

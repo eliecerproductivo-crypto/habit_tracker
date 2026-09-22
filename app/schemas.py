@@ -44,9 +44,10 @@ class HabitBase(BaseModel):
     end_time: Optional[str] = Field(default=None, pattern=TIME_RE)
     is_active: bool = True
     start_date: Optional[date] = None
-    recurrence_type: str = Field(default="weekly", pattern="^(weekly|interval|monthly)$")
+    recurrence_type: str = Field(default="weekly", pattern="^(weekly|interval|monthly|weekly_times)$")
     recurrence_interval: Optional[int] = Field(default=None, ge=1, le=365)
     recurrence_day_of_month: Optional[int] = Field(default=None, ge=-1, le=31)
+    recurrence_times_per_week: Optional[int] = Field(default=None, ge=1, le=7)
     duration_minutes: Optional[int] = Field(default=None, ge=1, le=480)
 
     @field_validator("days_of_week")
@@ -59,6 +60,12 @@ class HabitBase(BaseModel):
             if not p.isdigit() or not (0 <= int(p) <= 6):
                 raise ValueError("days_of_week entries must be integers 0-6")
         return ",".join(parts)
+
+    @field_validator("recurrence_times_per_week")
+    @classmethod
+    def validate_times_per_week(cls, v, info):
+        # Only required when recurrence_type is weekly_times
+        return v
 
 
 class HabitCreate(HabitBase):
@@ -77,6 +84,7 @@ class HabitOut(HabitBase):
     recurrence_type: str = "weekly"
     recurrence_interval: Optional[int] = None
     recurrence_day_of_month: Optional[int] = None
+    recurrence_times_per_week: Optional[int] = None
     has_logs: bool = False
 
     class Config:
@@ -140,6 +148,7 @@ class HabitStatsOut(BaseModel):
     recurrence_type: str = "weekly"
     recurrence_interval: Optional[int] = None
     recurrence_day_of_month: Optional[int] = None
+    recurrence_times_per_week: Optional[int] = None
     start_date: Optional[date] = None
     created_at: Optional[datetime] = None
 

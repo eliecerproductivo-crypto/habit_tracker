@@ -45,9 +45,16 @@ export function formatDuration(startMinutes, endMinutes) {
 
 /**
  * Returns true if a habit is scheduled to occur on a given ISO date string.
- * Handles all three recurrence types: weekly, interval, monthly.
+ * Handles all four recurrence types: weekly, interval, monthly, weekly_times.
+ *
+ * For weekly_times: the habit appears every day of the week until the user has
+ * logged it recurrence_times_per_week times in that week (Mon–Sun).
+ * `completedDatesInWeek` is an optional Set<string> of ISO dates already marked
+ * "done" for this habit in the same week — used to hide the habit once the
+ * weekly quota is reached. Pass undefined/null to show it unconditionally (e.g.
+ * in the heatmap or when building the schedule without log context).
  */
-export function habitOccursOnDate(habit, isoDate) {
+export function habitOccursOnDate(habit, isoDate, completedDatesInWeek = null) {
   const type = habit.recurrence_type || "weekly";
 
   if (type === "weekly") {
@@ -83,7 +90,28 @@ export function habitOccursOnDate(habit, isoDate) {
     return d === dom;
   }
 
+  if (type === "weekly_times") {
+    const target = habit.recurrence_times_per_week ?? 1;
+    // If caller provided the set of already-completed dates for this week,
+    // hide the habit once the quota is reached (and this day isn't already one
+    // of the completed ones — keep it visible so the user can undo it).
+    if (completedDatesInWeek !== null) {
+      const alreadyDoneThisDay = completedDatesInWeek.has(isoDate);
+      const doneCount = completedDatesInWeek.size;
+      if (!alreadyDoneThisDay && doneCount >= target) return false;
+    }
+    return true; // show on every day of the week
+  }
+
   return false;
+}
+
+/**
+ * Like habitOccursOnDate but without log context — always returns true for
+ * weekly_times (used for heatmap / stats where we want to show all days).
+ */
+export function habitOccursOnDateRaw(habit, isoDate) {
+  return habitOccursOnDate(habit, isoDate, null);
 }
 
 export function habitStatusNow(habit, now = new Date()) {
@@ -151,4 +179,29 @@ export function formatDateLabel(isoDate) {
     day: "numeric",
     month: "long",
   });
+}
+
+/**
+ * Returns the ISO date of the Monday of the week containing isoDate.
+ * Week starts on Monday (ISO convention).
+ */
+export function weekMondayOf(isoDate) {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  // getDay(): 0=Sun,1=Mon,...,6=Sat  →  shift so Mon=0
+  const dow = (dt.getDay() + 6) % 7;
+  dt.setDate(dt.getDate() - dow);
+  return [
+    dt.getFullYear(),
+    String(dt.getMonth() + 1).padStart(2, "0"),
+    String(dt.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+/**
+ * Returns all 7 ISO dates (Mon–Sun) of the week containing isoDate.
+ */
+export function weekDatesOf(isoDate) {
+  const monday = weekMondayOf(isoDate);
+  return Array.from({ length: 7 }, (_, i) => addDays(monday, i));
 }

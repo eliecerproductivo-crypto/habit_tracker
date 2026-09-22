@@ -295,8 +295,8 @@ export default function HabitStatsModal({ habit, onClose }) {
             <>
               {/* Mini stats */}
               <div className="flex flex-wrap gap-2">
-                <MiniStat icon={Flame}        label="Racha actual"   value={`${data.current_streak}d`} accent="mint" />
-                <MiniStat icon={Trophy}       label="Mejor racha"    value={`${data.best_streak}d`}    accent="signal" />
+                <MiniStat icon={Flame}        label="Racha actual"   value={`${data.current_streak}${habit.recurrence_type === "weekly_times" ? "sem" : "d"}`} accent="mint" />
+                <MiniStat icon={Trophy}       label="Mejor racha"    value={`${data.best_streak}${habit.recurrence_type === "weekly_times" ? "sem" : "d"}`}    accent="signal" />
                 <MiniStat icon={CheckCircle2} label="Completados"    value={data.total_done}            accent="violet" />
                 <MiniStat icon={Calendar}     label="Cumplimiento"   value={`${data.completion_rate}%`} accent="sky" />
               </div>
@@ -315,6 +315,7 @@ export default function HabitStatsModal({ habit, onClose }) {
                     recurrence_type: habit.recurrence_type ?? data.recurrence_type ?? "weekly",
                     recurrence_interval: habit.recurrence_interval ?? data.recurrence_interval,
                     recurrence_day_of_month: habit.recurrence_day_of_month ?? data.recurrence_day_of_month,
+                    recurrence_times_per_week: habit.recurrence_times_per_week ?? data.recurrence_times_per_week,
                     created_at: habit.created_at ?? data.created_at,
                   }}
                   logs={data.logs}
