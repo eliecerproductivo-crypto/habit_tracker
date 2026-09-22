@@ -131,10 +131,9 @@ def summarize_bio(bio_text: str) -> Optional[str]:
         {
             "role": "system",
             "content": (
-                "Eres un extractor de contexto personal. Tu tarea es leer la autobiografía de un usuario "
-                "y producir un perfil comprimido (máximo 150 palabras) en español en tercera persona. "
-                "Extrae únicamente: nombre, objetivos de vida, áreas de interés, valores, estilo de vida. "
-                "Elimina todo lo que no sea relevante para un coach personal. "
+                "Eres un extractor de contexto personal. Tu tarea es leer la autobiografía de un usuario y producir un perfil comprimido en español en tercera persona."
+                "Extrae únicamente campos importantes: nombre, objetivos de vida, áreas de interés, valores, estilo de vida, etc."
+                "Elimina todo lo que no sea relevante para un coach personal (no dejar data importante afuera)"
                 "Sé concreto y neutro. No agregues opiniones ni consejos."
             ),
         },
