@@ -10,7 +10,7 @@ import { useHabitsContext } from "../context/HabitsContext";
 import { useDayLogs } from "../hooks/useDayLogs";
 import { useStats } from "../hooks/useStats";
 import { useWildcard } from "../hooks/useWildcard";
-import { todayLocalISODate, toLocalISODate, habitOccursOnDate } from "../lib/schedule";
+import { todayLocalISODate, toLocalISODate, habitOccursOnDate, weekDatesOf } from "../lib/schedule";
 
 export default function Dashboard() {
   const location = useLocation();
@@ -80,9 +80,24 @@ export default function Dashboard() {
   });
 
   const isToday = selectedDate === todayLocalISODate();
-  const scheduledToday = habits.filter(
-    (h) => h.is_active !== false && habitOccursOnDate(h, selectedDate)
-  );
+
+  // Dates of the week containing selectedDate (Mon–Sun), for weekly_times quota
+  const weekDates = weekDatesOf(selectedDate);
+
+  const scheduledToday = habits.filter((h) => {
+    if (h.is_active === false) return false;
+    // Para hábitos weekly_times, construir el Set de días ya completados esta semana
+    let completedDatesInWeek = null;
+    if ((h.recurrence_type || "weekly") === "weekly_times") {
+      const byDate = weekLogsByHabitId[h.id] || {};
+      const done = new Set();
+      for (const iso of weekDates) {
+        if (byDate[iso]?.status === "done") done.add(iso);
+      }
+      completedDatesInWeek = done;
+    }
+    return habitOccursOnDate(h, selectedDate, completedDatesInWeek);
+  });
   const doneToday = scheduledToday.filter((h) => completedHabitIds.has(h.id)).length;
   const pct = scheduledToday.length ? Math.round((doneToday / scheduledToday.length) * 100) : 0;
 

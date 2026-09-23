@@ -191,10 +191,10 @@ def _weekly_times_week_status(
 
     if done_count >= target:
         return True
-    # Only mark as failed if the week is over (last day has passed)
-    if week_end < today or (week_end == today and date_type.today() == week_end):
+    # Only mark as failed if the entire week is strictly in the past
+    if week_end < today:
         return False
-    # Week still in progress — not a failure yet
+    # Week still in progress (includes today being any day Mon–Sun) — not a failure yet
     return None
 
 
@@ -202,17 +202,73 @@ def compute_user_stats(db: Session, user: models.User) -> schemas.StatsSummary:
     habits, logs, status_by_date, habits_by_weekday, non_weekly = _load_context(db, user)
     today = date_type.today()
 
-    today_status = _day_status(today, habits_by_weekday, non_weekly, status_by_date)
+    weekly_times_habits = [h for h in non_weekly if (h.recurrence_type or "") == "weekly_times"]
+
+    # Pre-compute weekly quota status for each weekly_times habit, keyed by
+    # the Monday of the week so _day_status_with_weekly() can query it cheaply.
+    # { (year, week): { habit_id: True/False/None } }
+    wt_week_status: dict[tuple, dict[int, bool | None]] = defaultdict(dict)
+    for h in weekly_times_habits:
+        all_weeks = _weeks_in_range(h.start_date or h.created_at.date(), today)
+        for yw in all_weeks:
+            ws = _week_start(*yw)
+            wt_week_status[yw][h.id] = _weekly_times_week_status(h, ws, status_by_date)
+
+    def day_status_combined(d: date_type) -> bool | None:
+        """
+        Combines per-day status (weekly/interval/monthly habits) with
+        the weekly quota status of weekly_times habits.
+
+        For weekly_times: a habit counts as "done" for every day of a week
+        where its quota was met, and as "failed" for every day of a past week
+        where it wasn't. This way the global streak is consistent.
+        """
+        base = _day_status(d, habits_by_weekday, non_weekly, status_by_date)
+
+        if not weekly_times_habits:
+            return base
+
+        yw = _iso_week(d)
+        wt_statuses = [wt_week_status[yw].get(h.id) for h in weekly_times_habits
+                       if (h.start_date or h.created_at.date()) <= d]
+
+        # Filter out habits that didn't exist yet
+        relevant = [s for s in wt_statuses if s is not None]
+
+        if not relevant:
+            # No weekly_times habit existed/evaluated this day
+            return base
+
+        # If any weekly_times habit failed its quota this week → day is failed
+        if False in relevant:
+            wt_result = False
+        # If all met quota → day is done from wt perspective
+        elif all(s is True for s in relevant):
+            wt_result = True
+        else:
+            # Some in progress (None after filtering shouldn't happen but be safe)
+            wt_result = None
+
+        # Merge with base (per-day habits)
+        if base is False or wt_result is False:
+            return False
+        if base is True and wt_result is True:
+            return True
+        if base is None and wt_result is True:
+            return True
+        if base is True and wt_result is None:
+            return True   # week still in progress, don't penalize daily habits
+        return None  # nothing scheduled or week still in progress
+
+    today_status = day_status_combined(today)
     current_streak = 0
-    # Si hoy ya está 100% completado, la racha cuenta desde hoy.
-    # Si hoy aún no está completado, se calcula desde ayer para evitar que la racha caiga a 0 durante el día.
     if today_status is True:
         cursor = today
     else:
         cursor = today - timedelta(days=1)
 
     for _ in range(MAX_LOOKBACK_DAYS):
-        status = _day_status(cursor, habits_by_weekday, non_weekly, status_by_date)
+        status = day_status_combined(cursor)
         if status is None:
             cursor -= timedelta(days=1)
             continue
@@ -227,7 +283,7 @@ def compute_user_stats(db: Session, user: models.User) -> schemas.StatsSummary:
     cursor = today - timedelta(days=MAX_LOOKBACK_DAYS)
     end_date = today if today_status is True else today - timedelta(days=1)
     while cursor <= end_date:
-        status = _day_status(cursor, habits_by_weekday, non_weekly, status_by_date)
+        status = day_status_combined(cursor)
         if status is True:
             running += 1
             best_streak = max(best_streak, running)
@@ -282,8 +338,7 @@ def compute_user_stats(db: Session, user: models.User) -> schemas.StatsSummary:
             if s == "done":
                 total_done += 1
 
-    # weekly_times: contar cuotas vs completados en la semana anterior completa
-    weekly_times_habits = [h for h in non_weekly if (h.recurrence_type or "") == "weekly_times"]
+    # weekly_times: contar cuotas vs completados en la semana que incluye ayer
     if weekly_times_habits:
         ref_day = today - timedelta(days=1)
         mon = ref_day - timedelta(days=ref_day.weekday())  # lunes de esa semana

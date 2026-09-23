@@ -70,6 +70,8 @@ def update_habit(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    from datetime import date as date_type, timedelta
+
     habit = _get_owned_habit(db, habit_id, current_user)
     has_logs = (
         db.query(models.HabitLog.id)
@@ -78,13 +80,28 @@ def update_habit(
         is not None
     )
 
-    if payload.start_date != habit.start_date and has_logs:
+    recurrence_type_changed = (
+        (payload.recurrence_type or "weekly") != (habit.recurrence_type or "weekly")
+    )
+
+    if payload.start_date != habit.start_date and has_logs and not recurrence_type_changed:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No se puede cambiar la fecha de inicio porque ya existen registros de cumplimiento para este hábito.",
         )
 
-    for field, value in payload.model_dump().items():
+    data = payload.model_dump()
+
+    # Si el tipo de recurrencia cambió y hay logs, mover start_date al lunes
+    # de la semana actual para que las semanas pasadas no sean re-evaluadas
+    # con la nueva lógica (evita romper la racha histórica).
+    if recurrence_type_changed and has_logs:
+        today = date_type.today()
+        # Lunes de la semana actual (weekday(): 0=lun … 6=dom)
+        monday_this_week = today - timedelta(days=today.weekday())
+        data["start_date"] = monday_this_week
+
+    for field, value in data.items():
         setattr(habit, field, value)
     db.commit()
     db.refresh(habit)

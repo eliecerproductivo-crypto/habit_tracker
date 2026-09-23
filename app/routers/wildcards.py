@@ -13,6 +13,7 @@ Reglas de negocio:
     otorga el comodín y devuelve ganado=True (para mostrar la notificación).
 """
 
+from collections import defaultdict
 from datetime import date as date_type, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -21,7 +22,7 @@ from sqlalchemy.orm import Session
 from app import models, schemas
 from app.auth import get_current_user
 from app.database import get_db
-from app.routers.stats import compute_user_stats   # reutiliza el cálculo de racha
+from app.routers.stats import compute_user_stats, _habit_occurs_on_date   # reutiliza el cálculo de racha
 
 MAX_BALANCE = 2
 MILESTONE_INTERVAL = 15  # días
@@ -185,7 +186,42 @@ def use_wildcard(
         .all()
     )
 
+    # Pre-calcular todos los logs de la semana para verificar cuotas weekly_times
+    week_start = payload.date - timedelta(days=payload.date.weekday())   # lunes
+    week_end   = week_start + timedelta(days=6)
+    week_logs = (
+        db.query(models.HabitLog)
+        .filter(
+            models.HabitLog.user_id == current_user.id,
+            models.HabitLog.date >= week_start,
+            models.HabitLog.date <= week_end,
+        )
+        .all()
+    )
+    # { habit_id: count_done_this_week }
+    done_this_week: dict[int, int] = defaultdict(int)
+    for wl in week_logs:
+        if wl.status == "done":
+            done_this_week[wl.habit_id] += 1
+
     for habit in habits:
+        effective_start = habit.start_date or habit.created_at.date()
+        # No crear log si el hábito no existía aún ese día
+        if payload.date < effective_start:
+            continue
+
+        # Para hábitos weekly: verificar que el día de la semana esté programado
+        # Para hábitos interval/monthly: verificar con _habit_occurs_on_date
+        # Para hábitos weekly_times: verificar que la cuota no esté ya cubierta
+        rtype = habit.recurrence_type or "weekly"
+        if rtype == "weekly_times":
+            target = habit.recurrence_times_per_week or 1
+            if done_this_week[habit.id] >= target:
+                continue   # cuota ya cubierta, no tocar
+        else:
+            if not _habit_occurs_on_date(habit, payload.date):
+                continue   # no programado para ese día
+
         existing_log = (
             db.query(models.HabitLog)
             .filter(
