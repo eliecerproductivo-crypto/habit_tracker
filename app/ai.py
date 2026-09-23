@@ -17,21 +17,31 @@ logger = logging.getLogger(__name__)
 # Para agregar más, solo añade OPENAI_API_KEY_N en las variables de entorno.
 def _load_api_keys() -> list[str]:
     keys = []
-    # Key principal sin número
-    k = os.getenv("OPENAI_API_KEY")
-    if k:
-        keys.append(k)
-    # Keys numeradas a partir del 2 — busca hasta que no haya más
-    i = 2
-    while True:
-        k = os.getenv(f"OPENAI_API_KEY_{i}")
-        if not k:
-            break
-        keys.append(k)
-        i += 1
-    return keys
+    # Busca tanto GEMINI_API_KEY como OPENAI_API_KEY (y sus variantes numeradas)
+    candidates = [
+        "GEMINI_API_KEY", "OPENAI_API_KEY",
+        "GEMINI_API_KEY_2", "OPENAI_API_KEY_2",
+        "GEMINI_API_KEY_3", "OPENAI_API_KEY_3",
+    ]
+    seen = set()
+    for env_var in candidates:
+        val = os.getenv(env_var, "").strip()
+        if val and val not in seen:
+            keys.append(val)
+            seen.add(val)
 
-GEMINI_API_KEYS: list[str] = _load_api_keys()
+    # Buscar keys numeradas adicionales si existen (_4, _5, ...)
+    for prefix in ("GEMINI_API_KEY_", "OPENAI_API_KEY_"):
+        i = 4
+        while True:
+            val = os.getenv(f"{prefix}{i}", "").strip()
+            if not val:
+                break
+            if val not in seen:
+                keys.append(val)
+                seen.add(val)
+            i += 1
+    return keys
 
 MODELS = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-flash-latest"]
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
@@ -92,11 +102,12 @@ def _call_with_fallback(messages: list[dict], max_tokens: int = 500) -> Optional
     Si un modelo reporta alta demanda (503) o límite (429), salta inmediatamente
     al siguiente modelo de menor demanda sin reintentos innecesarios.
     """
-    if not GEMINI_API_KEYS:
-        logger.warning("No OPENAI_API_KEY (Gemini key) configured")
+    api_keys = _load_api_keys()
+    if not api_keys:
+        logger.warning("No GEMINI_API_KEY or OPENAI_API_KEY configured in environment")
         return None
 
-    for key_index, api_key in enumerate(GEMINI_API_KEYS):
+    for key_index, api_key in enumerate(api_keys):
         logger.info("Trying key #%d (starts: %s...)", key_index + 1, api_key[:8])
         for model_name in MODELS:
             for attempt in range(1, MAX_RETRIES + 1):
