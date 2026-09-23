@@ -33,14 +33,14 @@ def _load_api_keys() -> list[str]:
 
 GEMINI_API_KEYS: list[str] = _load_api_keys()
 
-MODEL = "gemini-flash-lite-latest"
+MODELS = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-flash-latest"]
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
-MAX_RETRIES = 3
-RETRY_DELAY = 2
+MAX_RETRIES = 2
+RETRY_DELAY = 1
 
 
-def _call_gemini(api_key: str, messages: list[dict], max_tokens: int = 500) -> str:
+def _call_gemini(api_key: str, messages: list[dict], max_tokens: int = 500, model_name: str = "gemini-3.8-flash") -> str:
     """
     Llama a la API de Gemini.
     Convierte el formato OpenAI-style (role/content) al formato Gemini (parts).
@@ -66,7 +66,7 @@ def _call_gemini(api_key: str, messages: list[dict], max_tokens: int = 500) -> s
     if system_text:
         payload["systemInstruction"] = {"parts": [{"text": system_text}]}
 
-    url = f"{GEMINI_BASE}/{MODEL}:generateContent?key={api_key}"
+    url = f"{GEMINI_BASE}/{model_name}:generateContent?key={api_key}"
     data = json.dumps(payload).encode("utf-8")
 
     req = urllib.request.Request(
@@ -77,19 +77,20 @@ def _call_gemini(api_key: str, messages: list[dict], max_tokens: int = 500) -> s
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=12) as resp:
             result = json.loads(resp.read())
             return result["candidates"][0]["content"]["parts"][0]["text"].strip()
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
-        logger.error("Gemini HTTP %s — body: %s", e.code, body)
+        e.response_body = body
+        logger.error("Gemini HTTP %s on model %s — body: %s", e.code, model_name, body)
         raise
 
 
 def _call_with_fallback(messages: list[dict], max_tokens: int = 500) -> Optional[str]:
-    """Intenta con cada key disponible, con reintentos por key.
-    Si el error es de autenticación (401/400 API_KEY_INVALID), pasa a la
-    siguiente key de inmediato sin reintentar la misma.
+    """Intenta con cada key disponible y modelos en orden de prioridad (3.8 -> 3.5 -> 2.5).
+    Si un modelo reporta alta demanda (503) o límite (429), salta inmediatamente
+    al siguiente modelo de menor demanda sin reintentos innecesarios.
     """
     if not GEMINI_API_KEYS:
         logger.warning("No OPENAI_API_KEY (Gemini key) configured")
@@ -97,28 +98,37 @@ def _call_with_fallback(messages: list[dict], max_tokens: int = 500) -> Optional
 
     for key_index, api_key in enumerate(GEMINI_API_KEYS):
         logger.info("Trying key #%d (starts: %s...)", key_index + 1, api_key[:8])
-        for attempt in range(1, MAX_RETRIES + 1):
-            try:
-                logger.info("Gemini call attempt %d/%d with key #%d", attempt, MAX_RETRIES, key_index + 1)
-                result = _call_gemini(api_key, messages, max_tokens)
-                logger.info("Gemini call succeeded with key #%d on attempt %d", key_index + 1, attempt)
-                return result
-            except urllib.error.HTTPError as e:
-                # Si la key es inválida no tiene sentido reintentar — pasar a la siguiente
-                if e.code in (400, 401, 403):
-                    logger.warning(
-                        "Key #%d rejected (HTTP %s), skipping to next key", key_index + 1, e.code
-                    )
-                    break  # sale del loop de reintentos, prueba la siguiente key
-                logger.warning("Key #%d attempt %d/%d failed: %s", key_index + 1, attempt, MAX_RETRIES, e)
-                if attempt < MAX_RETRIES:
-                    time.sleep(RETRY_DELAY)
-            except Exception as e:
-                logger.warning("Key #%d attempt %d/%d failed (exception): %s", key_index + 1, attempt, MAX_RETRIES, e)
-                if attempt < MAX_RETRIES:
-                    time.sleep(RETRY_DELAY)
+        for model_name in MODELS:
+            for attempt in range(1, MAX_RETRIES + 1):
+                try:
+                    logger.info("Gemini call attempt %d/%d with model %s and key #%d", attempt, MAX_RETRIES, model_name, key_index + 1)
+                    result = _call_gemini(api_key, messages, max_tokens, model_name=model_name)
+                    logger.info("Gemini call succeeded with model %s on attempt %d", model_name, attempt)
+                    return result
+                except urllib.error.HTTPError as e:
+                    body = getattr(e, "response_body", "")
+                    # Si la key es inválida, cambiar a la siguiente key
+                    if e.code in (401, 403) or "API_KEY_INVALID" in body:
+                        logger.warning("Key #%d rejected (HTTP %s), skipping to next key", key_index + 1, e.code)
+                        break
+                    # Si el modelo tiene alta demanda (503), saturación (429) o no disponible (404),
+                    # pasar inmediatamente al siguiente modelo (ej. de 3.8 a 3.5)
+                    if e.code in (503, 429, 404) or "high demand" in body.lower():
+                        logger.warning("Model %s high demand/unavailable (HTTP %s), falling back to next model", model_name, e.code)
+                        break
+                    logger.warning("Model %s attempt %d/%d failed: %s", model_name, attempt, MAX_RETRIES, e)
+                    if attempt < MAX_RETRIES:
+                        time.sleep(RETRY_DELAY)
+                except Exception as e:
+                    logger.warning("Model %s attempt %d/%d failed (exception): %s", model_name, attempt, MAX_RETRIES, e)
+                    # En timeouts de conexión de socket, saltar al siguiente modelo
+                    if "timed out" in str(e).lower():
+                        logger.warning("Model %s timed out, skipping to next model", model_name)
+                        break
+                    if attempt < MAX_RETRIES:
+                        time.sleep(RETRY_DELAY)
 
-    logger.error("All Gemini keys and retries exhausted")
+    logger.error("All Gemini keys and models exhausted")
     return None
 
 

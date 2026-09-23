@@ -80,11 +80,15 @@ def update_habit(
         is not None
     )
 
-    recurrence_type_changed = (
+    schedule_changed = (
         (payload.recurrence_type or "weekly") != (habit.recurrence_type or "weekly")
+        or (payload.days_of_week or "") != (habit.days_of_week or "")
+        or payload.recurrence_interval != habit.recurrence_interval
+        or payload.recurrence_day_of_month != habit.recurrence_day_of_month
+        or payload.recurrence_times_per_week != habit.recurrence_times_per_week
     )
 
-    if payload.start_date != habit.start_date and has_logs and not recurrence_type_changed:
+    if payload.start_date != habit.start_date and has_logs and not schedule_changed:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No se puede cambiar la fecha de inicio porque ya existen registros de cumplimiento para este hábito.",
@@ -92,14 +96,20 @@ def update_habit(
 
     data = payload.model_dump()
 
-    # Si el tipo de recurrencia cambió y hay logs, mover start_date al lunes
-    # de la semana actual para que las semanas pasadas no sean re-evaluadas
-    # con la nueva lógica (evita romper la racha histórica).
-    if recurrence_type_changed and has_logs:
+    # Si la frecuencia o programación cambió y ya hay logs históricos,
+    # ajustar start_date para que la nueva regla entre en vigencia desde ahora
+    # y las semanas/días pasados no sean re-evaluados con la nueva regla.
+    if schedule_changed and has_logs:
         today = date_type.today()
-        # Lunes de la semana actual (weekday(): 0=lun … 6=dom)
-        monday_this_week = today - timedelta(days=today.weekday())
-        data["start_date"] = monday_this_week
+        new_type = payload.recurrence_type or "weekly"
+        if new_type == "weekly_times":
+            # Para cuotas semanales, la vigencia abarca la semana en curso (lunes a domingo)
+            monday_this_week = today - timedelta(days=today.weekday())
+            data["start_date"] = monday_this_week
+        else:
+            # Para días fijos (weekly), intervalo o mensual, entra en vigencia desde hoy
+            # para no penalizar días anteriores de la misma semana
+            data["start_date"] = today
 
     for field, value in data.items():
         setattr(habit, field, value)
