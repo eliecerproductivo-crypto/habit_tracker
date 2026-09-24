@@ -350,6 +350,20 @@ def chat(
     else:
         bio_summary = None
 
+    # ── 2.5 Insights acumulados del coach ────────────────────────────────────
+    import json as _json
+    insights_row = (
+        db.query(models.UserInsights)
+        .filter(models.UserInsights.user_id == current_user.id)
+        .first()
+    )
+    user_insights: dict | None = None
+    if insights_row:
+        try:
+            user_insights = _json.loads(insights_row.insights_json)
+        except Exception:
+            user_insights = None
+
     # ── 3. Hábitos activos ────────────────────────────────────────────────────
     habits = (
         db.query(models.Habit)
@@ -521,6 +535,7 @@ def chat(
         },
         history=history,
         bio_summary=bio_summary,
+        user_insights=user_insights,
     )
 
     if not reply:

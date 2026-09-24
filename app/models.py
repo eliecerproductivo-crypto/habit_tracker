@@ -204,6 +204,31 @@ class WildcardBalance(Base):
     owner = relationship("User", foreign_keys=[user_id])
 
 
+class UserInsights(Base):
+    """
+    Conocimiento acumulado del usuario extraído de conversaciones con el coach.
+    Se guarda como JSON con listas de strings por categoría.
+    Ejemplo:
+    {
+      "desires": ["quiere comprar un monitor ultrawide"],
+      "goals": ["correr una maratón en 2025"],
+      "worries": ["siente que no duerme bien"],
+      "facts": ["trabaja desde casa", "tiene 2 hijos"],
+      "preferences": ["aprende mejor leyendo", "le cuesta madrugar"]
+    }
+    """
+    __tablename__ = "user_insights"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False, index=True)
+    insights_json = Column(String(8000), nullable=False, default="{}")
+    updated_at = Column(DateTime(timezone=True),
+                        default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc))
+
+    owner = relationship("User", foreign_keys=[user_id])
+
+
 class TimerSession(Base):
     __tablename__ = "timer_sessions"
 

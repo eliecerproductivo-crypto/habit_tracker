@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Send, Sparkles, Bot, User, Trash2, BookOpen, ChevronDown,
-  ChevronUp, CheckSquare, Square, ArrowDown,
+  ChevronUp, CheckSquare, Square, ArrowDown, BrainCircuit, CheckCheck, X,
 } from "lucide-react";
 import api from "../api/client";
 
@@ -10,14 +10,16 @@ const DIARY_TOGGLE_KEY      = "rutina_chat_include_diary";
 const HABIT_NOTES_TOGGLE_KEY= "rutina_chat_include_habit_notes";
 const EXCLUDED_ENTRIES_KEY  = "rutina_chat_excluded_entries";
 
+const HISTORY_CONTEXT_LIMIT = 5; // mensajes que se mandan al backend en cada chat
+
 function loadHistory() {
   try {
-    const raw = sessionStorage.getItem(SESSION_KEY);
+    const raw = localStorage.getItem(SESSION_KEY);
     return raw ? JSON.parse(raw) : [];
   } catch { return []; }
 }
 function saveHistory(h) {
-  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(h)); } catch {}
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify(h)); } catch {}
 }
 function formatDateShort(dateStr) {
   try {
@@ -74,6 +76,71 @@ const SUGGESTIONS = [
   "¿Cómo puedo mantener la racha?",
 ];
 
+// ── Modal de confirmación de insights guardados ───────────────────────────────
+const INSIGHT_LABELS = {
+  desires:     "Deseos",
+  goals:       "Metas",
+  worries:     "Preocupaciones",
+  facts:       "Datos personales",
+  preferences: "Preferencias",
+};
+
+function InsightsSavedModal({ insights, onClose }) {
+  const hasAny = insights && Object.values(insights).some((arr) => arr?.length > 0);
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-md rounded-2xl border border-line bg-panel shadow-xl p-5 flex flex-col gap-4">
+        <div className="flex items-center gap-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-violet-soft text-violet shrink-0">
+            <BrainCircuit size={16} />
+          </div>
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-ink">Aprendizaje guardado</p>
+            <p className="text-xs text-ink-soft">Tu coach recordará esto en futuras conversaciones.</p>
+          </div>
+          <button onClick={onClose} className="text-ink-faint hover:text-ink transition-colors cursor-pointer">
+            <X size={16} />
+          </button>
+        </div>
+
+        {hasAny ? (
+          <div className="flex flex-col gap-2 max-h-64 overflow-y-auto">
+            {Object.entries(INSIGHT_LABELS).map(([key, label]) => {
+              const items = insights[key] || [];
+              if (!items.length) return null;
+              return (
+                <div key={key}>
+                  <p className="text-[11px] font-semibold text-ink-faint uppercase tracking-wide mb-1">{label}</p>
+                  <ul className="flex flex-col gap-1">
+                    {items.map((item, i) => (
+                      <li key={i} className="flex items-start gap-2 text-xs text-ink">
+                        <span className="mt-0.5 shrink-0 text-violet"><CheckCheck size={12} /></span>
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-sm text-ink-soft text-center py-2">
+            No encontré datos nuevos que guardar en esta conversación.
+          </p>
+        )}
+
+        <button
+          onClick={onClose}
+          className="w-full rounded-xl bg-ink text-bg text-sm font-medium py-2 hover:opacity-80 transition-opacity cursor-pointer"
+        >
+          Entendido
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Componente principal ──────────────────────────────────────────────────────
 export default function AIChat() {
   const [history, setHistory]   = useState(() => loadHistory());
@@ -84,6 +151,10 @@ export default function AIChat() {
   const bottomRef   = useRef(null);
   const scrollRef   = useRef(null);
   const textareaRef = useRef(null);
+
+  // Estados para extracción de insights
+  const [extracting, setExtracting]           = useState(false);
+  const [savedInsights, setSavedInsights]     = useState(null); // muestra el modal
 
   const [includeDiary, setIncludeDiary] = useState(() => {
     const s = localStorage.getItem(DIARY_TOGGLE_KEY);
@@ -151,6 +222,20 @@ export default function AIChat() {
     });
   };
 
+  const extractInsights = async () => {
+    if (history.length === 0 || extracting) return;
+    setExtracting(true);
+    try {
+      // Manda la conversación COMPLETA (localStorage) para el mejor análisis posible
+      const res = await api.post("/profile/insights", { conversation: history });
+      setSavedInsights(res.data.insights);
+    } catch {
+      setSavedInsights({});
+    } finally {
+      setExtracting(false);
+    }
+  };
+
   const send = async (message) => {
     const text = (message || input).trim();
     if (!text || loading) return;
@@ -165,7 +250,7 @@ export default function AIChat() {
     try {
       const res = await api.post("/journal/chat", {
         message: text,
-        history,
+        history: history.slice(-HISTORY_CONTEXT_LIMIT), // solo últimos 5 como contexto
         include_diary: includeDiary,
         selected_entry_ids: includeDiary && loadedEntries ? Array.from(selectedEntryIds) : null,
         include_habit_notes: includeHabitNotes,
@@ -210,7 +295,19 @@ export default function AIChat() {
 
         {history.length > 0 && (
           <button
-            onClick={() => { setHistory([]); sessionStorage.removeItem(SESSION_KEY); }}
+            onClick={extractInsights}
+            disabled={extracting}
+            title="Aprender de esta conversación"
+            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium border border-transparent text-ink-soft hover:bg-panel-alt hover:text-violet transition-colors cursor-pointer disabled:opacity-50"
+          >
+            <BrainCircuit size={13} className={extracting ? "animate-pulse text-violet" : ""} />
+            {extracting ? "Analizando…" : "Aprender"}
+          </button>
+        )}
+
+        {history.length > 0 && (
+          <button
+            onClick={() => { setHistory([]); localStorage.removeItem(SESSION_KEY); }}
             title="Limpiar conversación"
             className="flex h-7 w-7 items-center justify-center rounded-lg text-ink-faint hover:bg-coral-soft hover:text-coral transition-colors cursor-pointer"
           >
@@ -357,6 +454,14 @@ export default function AIChat() {
           </button>
         </div>
       </div>
+
+      {/* ── Modal insights guardados ── */}
+      {savedInsights !== null && (
+        <InsightsSavedModal
+          insights={savedInsights}
+          onClose={() => setSavedInsights(null)}
+        />
+      )}
     </div>
   );
 }

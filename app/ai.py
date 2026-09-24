@@ -43,14 +43,21 @@ def _load_api_keys() -> list[str]:
             i += 1
     return keys
 
-MODELS = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-flash-latest"]
+MODELS = ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
+# Timeout por modelo: los modelos primarios con alta demanda fallan rápido,
+# los fallbacks tienen más tiempo para responder.
+_MODEL_TIMEOUT = {
+    "gemini-3.8-flash": 5,   # si tarda más de 5s en alta demanda, no vale la pena esperar
+    "gemini-3.5-flash": 20,
+    "gemini-2.0-flash": 20,
+}
 MAX_RETRIES = 2
 RETRY_DELAY = 1
 
 
-def _call_gemini(api_key: str, messages: list[dict], max_tokens: int = 500, model_name: str = "gemini-3.8-flash") -> str:
+def _call_gemini(api_key: str, messages: list[dict], max_tokens: int = 500, model_name: str = "gemini-3.8-flash", timeout: int = 8) -> str:
     """
     Llama a la API de Gemini.
     Convierte el formato OpenAI-style (role/content) al formato Gemini (parts).
@@ -87,7 +94,7 @@ def _call_gemini(api_key: str, messages: list[dict], max_tokens: int = 500, mode
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=12) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             result = json.loads(resp.read())
             return result["candidates"][0]["content"]["parts"][0]["text"].strip()
     except urllib.error.HTTPError as e:
@@ -98,49 +105,146 @@ def _call_gemini(api_key: str, messages: list[dict], max_tokens: int = 500, mode
 
 
 def _call_with_fallback(messages: list[dict], max_tokens: int = 500) -> Optional[str]:
-    """Intenta con cada key disponible y modelos en orden de prioridad (3.8 -> 3.5 -> 2.5).
-    Si un modelo reporta alta demanda (503) o límite (429), salta inmediatamente
-    al siguiente modelo de menor demanda sin reintentos innecesarios.
+    """
+    Intenta con cada modelo en orden (3.8 → 3.5 → fallback).
+    Si un modelo reporta high demand o 503/429, se descarta GLOBALMENTE para
+    todas las keys — no tiene sentido reintentar el mismo modelo sobrecargado
+    con otra key. Cambia al siguiente modelo inmediatamente.
+    Si la key es inválida (401/403), descarta esa key y prueba las restantes.
     """
     api_keys = _load_api_keys()
     if not api_keys:
         logger.warning("No GEMINI_API_KEY or OPENAI_API_KEY configured in environment")
         return None
 
-    for key_index, api_key in enumerate(api_keys):
-        logger.info("Trying key #%d (starts: %s...)", key_index + 1, api_key[:8])
-        for model_name in MODELS:
+    exhausted_models: set[str] = set()   # modelos descartados globalmente
+
+    for model_name in MODELS:
+        if model_name in exhausted_models:
+            continue
+
+        for key_index, api_key in enumerate(api_keys):
+            logger.info("Trying model %s with key #%d (starts: %s...)", model_name, key_index + 1, api_key[:8])
+
             for attempt in range(1, MAX_RETRIES + 1):
                 try:
-                    logger.info("Gemini call attempt %d/%d with model %s and key #%d", attempt, MAX_RETRIES, model_name, key_index + 1)
-                    result = _call_gemini(api_key, messages, max_tokens, model_name=model_name)
-                    logger.info("Gemini call succeeded with model %s on attempt %d", model_name, attempt)
+                    model_timeout = _MODEL_TIMEOUT.get(model_name, 20)
+                    logger.info("Gemini call attempt %d/%d — model %s key #%d timeout %ds", attempt, MAX_RETRIES, model_name, key_index + 1, model_timeout)
+                    result = _call_gemini(api_key, messages, max_tokens, model_name=model_name, timeout=model_timeout)
+                    logger.info("Gemini call succeeded — model %s key #%d attempt %d", model_name, key_index + 1, attempt)
                     return result
+
                 except urllib.error.HTTPError as e:
                     body = getattr(e, "response_body", "")
-                    # Si la key es inválida, cambiar a la siguiente key
+
+                    # Key inválida → saltar a la siguiente key, pero seguir con este modelo
                     if e.code in (401, 403) or "API_KEY_INVALID" in body:
-                        logger.warning("Key #%d rejected (HTTP %s), skipping to next key", key_index + 1, e.code)
-                        break
-                    # Si el modelo tiene alta demanda (503), saturación (429) o no disponible (404),
-                    # pasar inmediatamente al siguiente modelo (ej. de 3.8 a 3.5)
-                    if e.code in (503, 429, 404) or "high demand" in body.lower():
-                        logger.warning("Model %s high demand/unavailable (HTTP %s), falling back to next model", model_name, e.code)
-                        break
-                    logger.warning("Model %s attempt %d/%d failed: %s", model_name, attempt, MAX_RETRIES, e)
+                        logger.warning("Key #%d rejected (HTTP %s), trying next key", key_index + 1, e.code)
+                        break  # sale del loop de attempts → próxima key
+
+                    # Modelo sobrecargado o no disponible → descartarlo para todas las keys
+                    if e.code in (503, 429, 404) or "high demand" in body.lower() or "service_unavailable" in body.lower():
+                        logger.warning(
+                            "Model %s unavailable (HTTP %s) — marking as exhausted globally, falling back to next model",
+                            model_name, e.code,
+                        )
+                        exhausted_models.add(model_name)
+                        break  # sale de attempts Y de keys (el for-key se rompe abajo)
+
+                    # Error genérico → reintentar
+                    logger.warning("Model %s key #%d attempt %d/%d failed: HTTP %s", model_name, key_index + 1, attempt, MAX_RETRIES, e.code)
                     if attempt < MAX_RETRIES:
                         time.sleep(RETRY_DELAY)
+
                 except Exception as e:
-                    logger.warning("Model %s attempt %d/%d failed (exception): %s", model_name, attempt, MAX_RETRIES, e)
-                    # En timeouts de conexión de socket, saltar al siguiente modelo
+                    logger.warning("Model %s key #%d attempt %d/%d exception: %s", model_name, key_index + 1, attempt, MAX_RETRIES, e)
                     if "timed out" in str(e).lower():
-                        logger.warning("Model %s timed out, skipping to next model", model_name)
+                        logger.warning("Model %s timed out — marking as exhausted globally", model_name)
+                        exhausted_models.add(model_name)
                         break
                     if attempt < MAX_RETRIES:
                         time.sleep(RETRY_DELAY)
 
-    logger.error("All Gemini keys and models exhausted")
+            # Si el modelo fue marcado como agotado, salir también del loop de keys
+            if model_name in exhausted_models:
+                break
+
+    logger.error("All Gemini models exhausted: %s", exhausted_models)
     return None
+
+
+def extract_insights(conversation: list[dict], existing_insights: dict) -> Optional[dict]:
+    """
+    Analiza una conversación con el coach y extrae datos personales del usuario.
+    Recibe los insights ya guardados y devuelve un dict ACTUALIZADO (merge inteligente,
+    sin duplicados). Retorna None si la IA falla.
+
+    Categorías:
+      - desires:     cosas que quiere comprar, obtener o experimentar
+      - goals:       metas y objetivos personales o profesionales
+      - worries:     preocupaciones, miedos o fuentes de estrés
+      - facts:       datos concretos sobre su vida (familia, trabajo, ciudad, edad, etc.)
+      - preferences: cómo aprende, trabaja, se siente mejor, horarios, etc.)
+    """
+    existing_json = json.dumps(existing_insights, ensure_ascii=False)
+
+    # Formatear la conversación para el prompt
+    convo_lines = []
+    for m in conversation:
+        role_label = "Usuario" if m["role"] == "user" else "Coach"
+        convo_lines.append(f"{role_label}: {m['content']}")
+    convo_text = "\n".join(convo_lines)
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Eres un extractor de información personal. Tu tarea es analizar una conversación "
+                "entre un usuario y su coach de hábitos, y actualizar un perfil de conocimiento sobre el usuario.\n\n"
+                "CATEGORÍAS a extraer (solo si hay evidencia clara en la conversación):\n"
+                "  - desires: cosas que quiere comprar, obtener o experimentar (ej: 'quiere un monitor ultrawide')\n"
+                "  - goals: metas y objetivos personales o profesionales (ej: 'quiere cambiar de trabajo en 2025')\n"
+                "  - worries: preocupaciones, miedos o fuentes de estrés (ej: 'le preocupa no dormir bien')\n"
+                "  - facts: datos concretos de su vida (ej: 'trabaja desde casa', 'tiene dos hijos', '28 años')\n"
+                "  - preferences: cómo aprende, trabaja o se siente mejor (ej: 'le cuesta madrugar')\n\n"
+                "REGLAS ESTRICTAS:\n"
+                "1. Devuelve ÚNICAMENTE un JSON válido con esas 5 claves. Sin texto extra, sin markdown.\n"
+                "2. Cada valor es una lista de strings en español, concisos y en tercera persona.\n"
+                "3. Mergea con los insights existentes: conserva todo lo anterior y agrega solo lo NUEVO.\n"
+                "4. Elimina duplicados exactos o semánticamente equivalentes.\n"
+                "5. Si la conversación no aporta nada nuevo, devuelve los insights existentes sin cambios.\n"
+                "6. NO inventes ni inferas nada que el usuario no haya dicho explícitamente.\n\n"
+                f"INSIGHTS EXISTENTES:\n{existing_json}"
+            ),
+        },
+        {
+            "role": "user",
+            "content": f"CONVERSACIÓN:\n{convo_text}",
+        },
+    ]
+
+    raw = _call_with_fallback(messages, max_tokens=600)
+    if not raw:
+        return None
+
+    # Limpiar posible markdown que Gemini a veces agrega igual
+    clean = raw.strip()
+    if clean.startswith("```"):
+        clean = clean.split("```")[1]
+        if clean.startswith("json"):
+            clean = clean[4:]
+        clean = clean.strip()
+
+    try:
+        result = json.loads(clean)
+        # Garantizar que todas las claves existan aunque la IA omita alguna
+        for key in ("desires", "goals", "worries", "facts", "preferences"):
+            if key not in result or not isinstance(result[key], list):
+                result[key] = existing_insights.get(key, [])
+        return result
+    except json.JSONDecodeError:
+        logger.error("extract_insights: JSON inválido recibido: %s", clean[:200])
+        return None
 
 
 def summarize_bio(bio_text: str) -> Optional[str]:
@@ -189,6 +293,7 @@ def chat_with_context(
     recent_notes: list[str] | None = None,
     habit_notes: list[str] | None = None,
     timer_summary: str | None = None,
+    user_insights: dict | None = None,
 ) -> Optional[str]:
     """
     Responde al usuario usando perfil personal, hábitos, estadísticas,
@@ -196,6 +301,24 @@ def chat_with_context(
     """
     # ── Perfil ────────────────────────────────────────────────────────────────
     bio_block = f"\n\nQUIÉN SOY (perfil del usuario):\n{bio_summary}" if bio_summary else ""
+
+    # ── Insights acumulados del coach ─────────────────────────────────────────
+    insights_block = ""
+    if user_insights:
+        lines = []
+        labels = {
+            "desires":     "Deseos/compras",
+            "goals":       "Metas y objetivos",
+            "worries":     "Preocupaciones",
+            "facts":       "Datos personales",
+            "preferences": "Preferencias",
+        }
+        for key, label in labels.items():
+            items = user_insights.get(key, [])
+            if items:
+                lines.append(f"  {label}: {'; '.join(items)}")
+        if lines:
+            insights_block = "\n\nLO QUE SÉ DE TI (insights acumulados):\n" + "\n".join(lines)
 
     # ── Hábitos ───────────────────────────────────────────────────────────────
     habits_block = f"\n\nHÁBITOS ACTIVOS:\n{habits_text}" if habits_text else ""
@@ -261,13 +384,14 @@ def chat_with_context(
         f"{notes_block}"
         f"{habit_notes_block}"
         f"{bio_block}"
+        f"{insights_block}"
         f"{habits_block}"
         f"{timer_block}"
         f"{stats_block}"
     )
 
     messages = [{"role": "system", "content": system_prompt}]
-    messages.extend(history[-10:])
+    messages.extend(history)  # el frontend ya limita a los últimos N mensajes
     messages.append({"role": "user", "content": user_message})
 
     return _call_with_fallback(messages, max_tokens=400)

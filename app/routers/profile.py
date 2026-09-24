@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 import zipfile
 from datetime import datetime, timezone
 
@@ -99,6 +100,109 @@ def summarize_profile(
     db.commit()
     db.refresh(profile)
     return profile
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Insights acumulados del coach
+# ──────────────────────────────────────────────────────────────────────────────
+
+_EMPTY_INSIGHTS = {"desires": [], "goals": [], "worries": [], "facts": [], "preferences": []}
+
+
+class InsightsOut(BaseModel):
+    insights: dict
+    updated_at: datetime | None = None
+
+
+class ExtractInsightsRequest(BaseModel):
+    """Conversación a procesar para extraer insights."""
+    conversation: list[dict]  # lista de {role, content}
+
+
+@router.get("/insights", response_model=InsightsOut)
+def get_insights(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Devuelve los insights acumulados del usuario."""
+    row = (
+        db.query(models.UserInsights)
+        .filter(models.UserInsights.user_id == current_user.id)
+        .first()
+    )
+    if not row:
+        return InsightsOut(insights=_EMPTY_INSIGHTS, updated_at=None)
+    try:
+        insights = json.loads(row.insights_json)
+    except Exception:
+        insights = _EMPTY_INSIGHTS
+    return InsightsOut(insights=insights, updated_at=row.updated_at)
+
+
+@router.post("/insights", response_model=InsightsOut)
+def extract_and_save_insights(
+    payload: ExtractInsightsRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Recibe la conversación actual, extrae insights con IA (mergeando con los
+    ya guardados) y persiste el resultado. Llamado manualmente desde el chat.
+    """
+    from app.ai import extract_insights as ai_extract
+
+    if not payload.conversation:
+        raise HTTPException(status_code=400, detail="La conversación está vacía.")
+
+    # Cargar insights existentes
+    row = (
+        db.query(models.UserInsights)
+        .filter(models.UserInsights.user_id == current_user.id)
+        .first()
+    )
+    existing: dict = _EMPTY_INSIGHTS.copy()
+    if row:
+        try:
+            existing = json.loads(row.insights_json)
+        except Exception:
+            existing = _EMPTY_INSIGHTS.copy()
+
+    # Llamar a la IA para merge inteligente
+    updated = ai_extract(payload.conversation, existing)
+    if updated is None:
+        raise HTTPException(
+            status_code=503,
+            detail="La IA no está disponible. Intenta de nuevo.",
+        )
+
+    # Guardar
+    now = datetime.now(timezone.utc)
+    if row:
+        row.insights_json = json.dumps(updated, ensure_ascii=False)
+        row.updated_at = now
+    else:
+        row = models.UserInsights(
+            user_id=current_user.id,
+            insights_json=json.dumps(updated, ensure_ascii=False),
+        )
+        db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    return InsightsOut(insights=updated, updated_at=row.updated_at)
+
+
+@router.delete("/insights", status_code=204)
+def clear_insights(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Borra todos los insights del usuario (por si quiere empezar de cero)."""
+    db.query(models.UserInsights).filter(
+        models.UserInsights.user_id == current_user.id
+    ).delete()
+    db.commit()
+    return None
 
 
 # ──────────────────────────────────────────────────────────────────────────────
