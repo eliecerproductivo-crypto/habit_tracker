@@ -43,21 +43,20 @@ def _load_api_keys() -> list[str]:
             i += 1
     return keys
 
-MODELS = ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
+MODELS = ["gemini-3.8-flash", "gemini-3.5-flash"]
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 # Timeout por modelo: los modelos primarios con alta demanda fallan rápido,
 # los fallbacks tienen más tiempo para responder.
 _MODEL_TIMEOUT = {
-    "gemini-3.8-flash": 5,   # si tarda más de 5s en alta demanda, no vale la pena esperar
-    "gemini-3.5-flash": 20,
-    "gemini-2.0-flash": 20,
+    "gemini-3.8-flash": 8,   # si tarda más de 5s en alta demanda, no vale la pena esperar
+    "gemini-3.5-flash": 28,
 }
 MAX_RETRIES = 2
 RETRY_DELAY = 1
 
 
-def _call_gemini(api_key: str, messages: list[dict], max_tokens: int = 500, model_name: str = "gemini-3.8-flash", timeout: int = 8) -> str:
+def _call_gemini(api_key: str, messages: list[dict], max_tokens: int = 500, model_name: str = "gemini-3.8-flash", timeout: int = 20) -> str:
     """
     Llama a la API de Gemini.
     Convierte el formato OpenAI-style (role/content) al formato Gemini (parts).
