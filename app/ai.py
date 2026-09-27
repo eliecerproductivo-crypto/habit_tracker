@@ -109,7 +109,7 @@ def _call_gemini(api_key: str, messages: list[dict], max_tokens: int = 4096, mod
         raise
 
 
-def _call_with_fallback(messages: list[dict], max_tokens: int = 500) -> Optional[str]:
+def _call_with_fallback(messages: list[dict], max_tokens: int = 4096) -> Optional[str]:
     """
     Intenta con cada modelo en orden (3.8 → 3.5 → fallback).
     Si un modelo reporta high demand o 503/429, se descarta GLOBALMENTE para
@@ -228,7 +228,7 @@ def extract_insights(conversation: list[dict], existing_insights: dict) -> Optio
         },
     ]
 
-    raw = _call_with_fallback(messages, max_tokens=600)
+    raw = _call_with_fallback(messages, max_tokens=4096)
     if not raw:
         return None
 
@@ -269,7 +269,7 @@ def summarize_bio(bio_text: str) -> Optional[str]:
         },
         {"role": "user", "content": bio_text},
     ]
-    return _call_with_fallback(messages, max_tokens=250)
+    return _call_with_fallback(messages, max_tokens=4096)
 
 
 def summarize_entries(entries_text: str) -> Optional[str]:
@@ -285,7 +285,7 @@ def summarize_entries(entries_text: str) -> Optional[str]:
         },
         {"role": "user", "content": entries_text},
     ]
-    return _call_with_fallback(messages, max_tokens=120)
+    return _call_with_fallback(messages, max_tokens=4096)
 
 
 def chat_with_context(
@@ -399,4 +399,4 @@ def chat_with_context(
     messages.extend(history)  # el frontend ya limita a los últimos N mensajes
     messages.append({"role": "user", "content": user_message})
 
-    return _call_with_fallback(messages, max_tokens=400)
+    return _call_with_fallback(messages, max_tokens=4096)
