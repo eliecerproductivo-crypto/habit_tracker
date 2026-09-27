@@ -54,9 +54,9 @@ GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 # Timeout por modelo: los modelos primarios con alta demanda fallan rápido,
 # los fallbacks tienen más tiempo para responder.
 _MODEL_TIMEOUT = {
-    "gemini-3.8-flash": 20,
-    "gemini-3.5-flash": 20,
-    "gemini-3.5-flash-lite": 15,
+    "gemini-3.8-flash": 6,
+    "gemini-3.5-flash": 6,
+    "gemini-3.5-flash-lite": 6,
 }
 MAX_RETRIES = 2
 RETRY_DELAY = 1
@@ -110,73 +110,65 @@ def _call_gemini(api_key: str, messages: list[dict], max_tokens: int = 4096, mod
 
 
 def _call_with_fallback(messages: list[dict], max_tokens: int = 4096) -> Optional[str]:
-    """
-    Intenta con cada modelo en orden (3.8 → 3.5 → fallback).
-    Si un modelo reporta high demand o 503/429, se descarta GLOBALMENTE para
-    todas las keys — no tiene sentido reintentar el mismo modelo sobrecargado
-    con otra key. Cambia al siguiente modelo inmediatamente.
-    Si la key es inválida (401/403), descarta esa key y prueba las restantes.
-    """
     api_keys = _load_api_keys()
     if not api_keys:
-        logger.warning("No GEMINI_API_KEY or OPENAI_API_KEY configured in environment")
+        logger.warning("No GEMINI_API_KEY or OPENAI_API_KEY configured")
         return None
 
-    exhausted_models: set[str] = set()   # modelos descartados globalmente
+    exhausted_models: set[str] = set()
+    start_time = time.time()
+    MAX_TOTAL_TIME = 7.0  # segundos máximos para toda la operación
 
     for model_name in MODELS:
         if model_name in exhausted_models:
             continue
 
         for key_index, api_key in enumerate(api_keys):
-            logger.info("Trying model %s with key #%d (starts: %s...)", model_name, key_index + 1, api_key[:8])
+            # Calcular tiempo restante
+            elapsed = time.time() - start_time
+            remaining = MAX_TOTAL_TIME - elapsed
+            if remaining <= 0.5:  # margen mínimo
+                logger.warning("Global deadline reached, aborting fallback")
+                return None
+
+            # El timeout efectivo es el menor entre el del modelo y el tiempo restante
+            model_timeout = min(_MODEL_TIMEOUT.get(model_name, 6), remaining)
 
             for attempt in range(1, MAX_RETRIES + 1):
                 try:
-                    model_timeout = _MODEL_TIMEOUT.get(model_name, 20)
-                    logger.info("Gemini call attempt %d/%d — model %s key #%d timeout %ds", attempt, MAX_RETRIES, model_name, key_index + 1, model_timeout)
-                    result = _call_gemini(api_key, messages, max_tokens, model_name=model_name, timeout=model_timeout)
-                    logger.info("Gemini call succeeded — model %s key #%d attempt %d", model_name, key_index + 1, attempt)
+                    logger.info("Gemini call attempt %d/%d — model %s key #%d timeout %.1fs",
+                                attempt, MAX_RETRIES, model_name, key_index + 1, model_timeout)
+                    result = _call_gemini(api_key, messages, max_tokens,
+                                          model_name=model_name, timeout=model_timeout)
+                    logger.info("Gemini call succeeded — model %s key #%d", model_name, key_index + 1)
                     return result
 
                 except urllib.error.HTTPError as e:
                     body = getattr(e, "response_body", "")
-
-                    # Key inválida → saltar a la siguiente key, pero seguir con este modelo
                     if e.code in (401, 403) or "API_KEY_INVALID" in body:
                         logger.warning("Key #%d rejected (HTTP %s), trying next key", key_index + 1, e.code)
-                        break  # sale del loop de attempts → próxima key
-
-                    # Modelo sobrecargado o no disponible → descartarlo para todas las keys
+                        break
                     if e.code in (503, 429, 404) or "high demand" in body.lower() or "service_unavailable" in body.lower():
-                        logger.warning(
-                            "Model %s unavailable (HTTP %s) — marking as exhausted globally, falling back to next model",
-                            model_name, e.code,
-                        )
+                        logger.warning("Model %s unavailable (HTTP %s) — skipping", model_name, e.code)
                         exhausted_models.add(model_name)
-                        break  # sale de attempts Y de keys (el for-key se rompe abajo)
-
-                    # Error genérico → reintentar
-                    logger.warning("Model %s key #%d attempt %d/%d failed: HTTP %s", model_name, key_index + 1, attempt, MAX_RETRIES, e.code)
+                        break
+                    logger.warning("Model %s key #%d attempt %d failed: HTTP %s", model_name, key_index + 1, attempt, e.code)
                     if attempt < MAX_RETRIES:
-                        time.sleep(RETRY_DELAY)
-
+                        time.sleep(min(RETRY_DELAY, remaining))
                 except Exception as e:
-                    logger.warning("Model %s key #%d attempt %d/%d exception: %s", model_name, key_index + 1, attempt, MAX_RETRIES, e)
+                    logger.warning("Model %s key #%d attempt %d exception: %s", model_name, key_index + 1, attempt, e)
                     if "timed out" in str(e).lower():
-                        logger.warning("Model %s timed out — marking as exhausted globally", model_name)
+                        logger.warning("Model %s timed out — skipping", model_name)
                         exhausted_models.add(model_name)
                         break
                     if attempt < MAX_RETRIES:
-                        time.sleep(RETRY_DELAY)
+                        time.sleep(min(RETRY_DELAY, remaining))
 
-            # Si el modelo fue marcado como agotado, salir también del loop de keys
             if model_name in exhausted_models:
                 break
 
-    logger.error("All Gemini models exhausted: %s", exhausted_models)
+    logger.error("All Gemini models exhausted or deadline reached: %s", exhausted_models)
     return None
-
 
 def extract_insights(conversation: list[dict], existing_insights: dict) -> Optional[dict]:
     """
