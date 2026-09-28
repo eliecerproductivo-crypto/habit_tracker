@@ -263,6 +263,26 @@ def summarize_bio(bio_text: str) -> Optional[str]:
     return _call_with_fallback(messages, max_tokens=4096)
 
 
+def summarize_routine(routine_text: str) -> Optional[str]:
+    """
+    Comprime la descripción de rutina del usuario en un bloque corto
+    útil para el contexto del coach IA. Máximo ~150 palabras.
+    """
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Eres un extractor de contexto. Lee la descripción de la rutina diaria de un usuario "
+                "y produce un resumen comprimido en español, en tercera persona. "
+                "Extrae únicamente: horarios clave, estructura del día, compromisos fijos y bloques de tiempo disponible. "
+                "Máximo 150 palabras. Sin opiniones ni consejos. Solo hechos concretos."
+            ),
+        },
+        {"role": "user", "content": routine_text},
+    ]
+    return _call_with_fallback(messages, max_tokens=300)
+
+
 def summarize_entries(entries_text: str) -> Optional[str]:
     """Resume una entrada de diario. Retorna el resumen o None si falla."""
     messages = [

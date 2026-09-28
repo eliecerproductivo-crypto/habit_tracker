@@ -164,6 +164,10 @@ def _migrate(connection):
             connection.execute(text(
                 "ALTER TABLE user_profiles ADD COLUMN routine VARCHAR(5000) NOT NULL DEFAULT ''"
             ))
+        if "routine_summary" not in profile_cols:
+            connection.execute(text(
+                "ALTER TABLE user_profiles ADD COLUMN routine_summary VARCHAR(1000) DEFAULT NULL"
+            ))
 
 
 def init_db():

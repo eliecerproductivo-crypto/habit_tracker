@@ -172,6 +172,8 @@ class UserProfile(Base):
     bio_summary = Column(String(1000), nullable=True, default=None)
     # Descripción de la rutina diaria del usuario (horarios, estructura del día)
     routine = Column(String(5000), nullable=False, default="")
+    # Versión comprimida de la rutina generada por IA
+    routine_summary = Column(String(1000), nullable=True, default=None)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
                         onupdate=lambda: datetime.now(timezone.utc))
 

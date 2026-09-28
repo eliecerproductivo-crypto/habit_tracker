@@ -5,6 +5,7 @@ export function useProfile() {
   const [bio, setBio] = useState("");
   const [bioSummary, setBioSummary] = useState(null);
   const [routine, setRoutine] = useState("");
+  const [routineSummary, setRoutineSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -16,6 +17,7 @@ export function useProfile() {
       setBio(res.data.bio || "");
       setBioSummary(res.data.bio_summary || null);
       setRoutine(res.data.routine || "");
+      setRoutineSummary(res.data.routine_summary || null);
     } catch {
       setError("No se pudo cargar el perfil.");
     } finally {
@@ -30,6 +32,7 @@ export function useProfile() {
     setBio(res.data.bio);
     setBioSummary(res.data.bio_summary);
     setRoutine(res.data.routine || "");
+    setRoutineSummary(res.data.routine_summary || null);
     return res.data;
   };
 
@@ -37,15 +40,28 @@ export function useProfile() {
     const res = await api.post("/profile/summarize");
     setBio(res.data.bio);
     setBioSummary(res.data.bio_summary);
-    setRoutine(res.data.routine || "");
     return res.data;
   };
 
   const saveRoutine = async (text) => {
     const res = await api.put("/profile/routine", { routine: text });
     setRoutine(res.data.routine || "");
+    // Guardar invalida el resumen anterior
+    setRoutineSummary(res.data.routine_summary || null);
     return res.data;
   };
 
-  return { bio, bioSummary, routine, loading, error, saveBio, summarizeBio, saveRoutine };
+  const summarizeRoutine = async () => {
+    const res = await api.post("/profile/routine/summarize");
+    setRoutineSummary(res.data.routine_summary || null);
+    return res.data;
+  };
+
+  return {
+    bio, bioSummary,
+    routine, routineSummary,
+    loading, error,
+    saveBio, summarizeBio,
+    saveRoutine, summarizeRoutine,
+  };
 }

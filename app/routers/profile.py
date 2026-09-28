@@ -20,6 +20,7 @@ class ProfileOut(BaseModel):
     bio: str
     bio_summary: str | None
     routine: str = ""
+    routine_summary: str | None = None
 
     class Config:
         from_attributes = True
@@ -121,6 +122,8 @@ def update_routine(
     )
     if profile:
         profile.routine = payload.routine
+        # Si cambia la rutina, invalidar el resumen anterior
+        profile.routine_summary = None
         profile.updated_at = datetime.now(timezone.utc)
     else:
         profile = models.UserProfile(
@@ -128,6 +131,39 @@ def update_routine(
             routine=payload.routine,
         )
         db.add(profile)
+    db.commit()
+    db.refresh(profile)
+    return profile
+
+
+@router.post("/routine/summarize", response_model=ProfileOut)
+def summarize_routine(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Genera un resumen comprimido de la rutina diaria usando IA.
+    Solo extrae lo relevante (horarios, estructura) para el contexto del coach.
+    """
+    from app.ai import summarize_routine as ai_summarize_routine
+
+    profile = (
+        db.query(models.UserProfile)
+        .filter(models.UserProfile.user_id == current_user.id)
+        .first()
+    )
+    if not profile or not profile.routine.strip():
+        raise HTTPException(status_code=400, detail="Escribe tu rutina antes de resumirla.")
+
+    summary = ai_summarize_routine(profile.routine)
+    if not summary:
+        raise HTTPException(
+            status_code=503,
+            detail="La IA no está disponible. Intenta de nuevo.",
+        )
+
+    profile.routine_summary = summary
+    profile.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(profile)
     return profile

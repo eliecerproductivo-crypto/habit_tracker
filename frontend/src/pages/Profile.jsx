@@ -31,7 +31,7 @@ function Tabs({ active, onChange }) {
 }
 
 export default function Profile() {
-  const { bio, bioSummary, routine, loading, error, saveBio, summarizeBio, saveRoutine } = useProfile();
+  const { bio, bioSummary, routine, routineSummary, loading, error, saveBio, summarizeBio, saveRoutine, summarizeRoutine } = useProfile();
 
   const [activeTab, setActiveTab] = useState("perfil");
 
@@ -48,6 +48,8 @@ export default function Profile() {
   const [savingRoutine, setSavingRoutine] = useState(false);
   const [savedRoutine, setSavedRoutine] = useState(false);
   const [saveRoutineError, setSaveRoutineError] = useState("");
+  const [summarizingRoutine, setSummarizingRoutine] = useState(false);
+  const [summarizeRoutineError, setSummarizeRoutineError] = useState("");
 
   // ── Estado: exportar ──────────────────────────────────────────────────────
   const [exporting, setExporting] = useState(false);
@@ -101,6 +103,18 @@ export default function Profile() {
       setSaveRoutineError(err?.response?.data?.detail || "No se pudo guardar.");
     } finally {
       setSavingRoutine(false);
+    }
+  };
+
+  const handleSummarizeRoutine = async () => {
+    setSummarizingRoutine(true);
+    setSummarizeRoutineError("");
+    try {
+      await summarizeRoutine();
+    } catch (err) {
+      setSummarizeRoutineError(err?.response?.data?.detail || "No se pudo generar el resumen.");
+    } finally {
+      setSummarizingRoutine(false);
     }
   };
 
@@ -229,52 +243,93 @@ export default function Profile() {
 
       {/* ── Pestaña: Mi rutina ───────────────────────────────────────────── */}
       {activeTab === "rutina" && (
-        <div className="rounded-2xl border border-line bg-panel p-5 flex flex-col gap-3">
-          <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-400">
-              <CalendarClock size={15} />
+        <>
+          <div className="rounded-2xl border border-line bg-panel p-5 flex flex-col gap-3">
+            <div className="flex items-center gap-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-400">
+                <CalendarClock size={15} />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-ink">Mi rutina diaria</p>
+                <p className="text-xs text-ink-faint">
+                  Describe cómo es tu día típico: horarios, estructura, compromisos fijos
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="text-sm font-semibold text-ink">Mi rutina diaria</p>
-              <p className="text-xs text-ink-faint">
-                Describe cómo es tu día típico: horarios, estructura, compromisos fijos
-              </p>
+
+            <textarea
+              value={routineText}
+              onChange={(e) => setRoutineText(e.target.value)}
+              placeholder={
+                "Describe tu rutina tal cual es. Por ejemplo:\n\n" +
+                "Me levanto a las 6:30. De 7:00 a 8:00 hago ejercicio. " +
+                "Trabajo de 9:00 a 18:00 con una hora de almuerzo a las 13:00. " +
+                "Por las noches estudio de 20:00 a 21:30. Me duermo a las 23:00…"
+              }
+              rows={10}
+              maxLength={5000}
+              className="w-full resize-none rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-ink outline-none focus:border-signal placeholder:text-ink-faint leading-relaxed"
+            />
+
+            <p className="text-xs text-ink-faint">
+              Tu coach usará esto para darte recomendaciones más ajustadas a tu día real, no solo a tus hábitos registrados.
+            </p>
+
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-ink-faint">{routineText.length}/5000</span>
+              <div className="flex items-center gap-2">
+                {savedRoutine && <span className="text-xs text-mint font-medium">¡Guardado!</span>}
+                {saveRoutineError && <span className="text-xs text-coral">{saveRoutineError}</span>}
+                <button
+                  onClick={handleSaveRoutine}
+                  disabled={savingRoutine}
+                  className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-50 cursor-pointer"
+                >
+                  {savingRoutine ? "Guardando…" : "Guardar rutina"}
+                </button>
+              </div>
             </div>
           </div>
 
-          <textarea
-            value={routineText}
-            onChange={(e) => setRoutineText(e.target.value)}
-            placeholder={
-              "Describe tu rutina tal cual es. Por ejemplo:\n\n" +
-              "Me levanto a las 6:30. De 7:00 a 8:00 hago ejercicio. " +
-              "Trabajo de 9:00 a 18:00 con una hora de almuerzo a las 13:00. " +
-              "Por las noches estudio de 20:00 a 21:30. Me duermo a las 23:00…"
-            }
-            rows={10}
-            maxLength={5000}
-            className="w-full resize-none rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-ink outline-none focus:border-signal placeholder:text-ink-faint leading-relaxed"
-          />
-
-          <p className="text-xs text-ink-faint">
-            Tu coach usará esto para darte recomendaciones más ajustadas a tu día real, no solo a tus hábitos registrados.
-          </p>
-
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-ink-faint">{routineText.length}/5000</span>
-            <div className="flex items-center gap-2">
-              {savedRoutine && <span className="text-xs text-mint font-medium">¡Guardado!</span>}
-              {saveRoutineError && <span className="text-xs text-coral">{saveRoutineError}</span>}
+          {/* Resumen IA de la rutina */}
+          <div className="rounded-2xl border border-line bg-panel p-5 flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-violet-soft text-violet">
+                  <Sparkles size={15} />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-ink">Rutina comprimida para la IA</p>
+                  <p className="text-xs text-ink-faint">Lo que el coach recibe en cada conversación</p>
+                </div>
+              </div>
               <button
-                onClick={handleSaveRoutine}
-                disabled={savingRoutine}
-                className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-50 cursor-pointer"
+                onClick={handleSummarizeRoutine}
+                disabled={summarizingRoutine || !routine.trim()}
+                className="rounded-lg bg-violet px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
               >
-                {savingRoutine ? "Guardando…" : "Guardar rutina"}
+                <Sparkles size={12} />
+                {summarizingRoutine ? "Resumiendo…" : routineSummary ? "Regenerar" : "Generar"}
               </button>
             </div>
+
+            {summarizeRoutineError && (
+              <p className="rounded-lg bg-coral-soft px-3 py-2 text-sm text-coral">{summarizeRoutineError}</p>
+            )}
+
+            {routineSummary ? (
+              <div className="rounded-lg bg-violet-soft px-4 py-3">
+                <p className="text-sm text-ink-soft leading-relaxed">{routineSummary}</p>
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-line px-4 py-6 text-center">
+                <p className="text-xs text-ink-faint">
+                  Guarda tu rutina y presiona "Generar" para que la IA la comprima antes de usarla como contexto.
+                </p>
+              </div>
+            )}
           </div>
-        </div>
+        </>
       )}
 
       {/* ── Exportar datos (siempre visible) ────────────────────────────── */}
