@@ -350,6 +350,11 @@ def chat(
     else:
         bio_summary = None
 
+    # Rutina diaria del usuario (texto libre)
+    routine_text: str | None = None
+    if user_profile and getattr(user_profile, "routine", None):
+        routine_text = user_profile.routine.strip() or None
+
     # ── 2.5 Insights acumulados del coach ────────────────────────────────────
     import json as _json
     insights_row = (
@@ -535,6 +540,7 @@ def chat(
         },
         history=history,
         bio_summary=bio_summary,
+        routine=routine_text,
         user_insights=user_insights,
     )
 

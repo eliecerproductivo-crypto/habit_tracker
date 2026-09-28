@@ -157,6 +157,14 @@ def _migrate(connection):
                 "ALTER TABLE wildcard_balance ADD COLUMN updated_at TIMESTAMP DEFAULT NULL"
             ))
 
+    # ── user_profiles: columna routine (descripción de la rutina diaria) ──
+    if "user_profiles" in inspector.get_table_names():
+        profile_cols = {c["name"] for c in inspector.get_columns("user_profiles")}
+        if "routine" not in profile_cols:
+            connection.execute(text(
+                "ALTER TABLE user_profiles ADD COLUMN routine VARCHAR(5000) NOT NULL DEFAULT ''"
+            ))
+
 
 def init_db():
     # Creates tables if they don't exist yet, then applies pending migrations.

@@ -53,9 +53,9 @@ GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 # Timeout por modelo: los modelos primarios con alta demanda fallan rápido,
 # los fallbacks tienen más tiempo para responder.
 _MODEL_TIMEOUT = {
-    "gemini-3.8-flash": 6,
-    "gemini-3.5-flash": 6,
-    "gemini-3.5-flash-lite": 6,
+    "gemini-3.8-flash": 8,
+    "gemini-3.5-flash": 8,
+    "gemini-3.5-flash-lite": 8,
 }
 MAX_RETRIES = 2
 RETRY_DELAY = 1
@@ -286,6 +286,7 @@ def chat_with_context(
     habits_text: str = "",
     stats: dict | None = None,
     bio_summary: str | None = None,
+    routine: str | None = None,
     recent_notes: list[str] | None = None,
     habit_notes: list[str] | None = None,
     timer_summary: str | None = None,
@@ -297,6 +298,9 @@ def chat_with_context(
     """
     # ── Perfil ────────────────────────────────────────────────────────────────
     bio_block = f"\n\nQUIÉN SOY (perfil del usuario):\n{bio_summary}" if bio_summary else ""
+
+    # ── Rutina diaria ─────────────────────────────────────────────────────────
+    routine_block = f"\n\nMI RUTINA DIARIA:\n{routine}" if routine else ""
 
     # ── Insights acumulados del coach ─────────────────────────────────────────
     insights_block = ""
@@ -380,6 +384,7 @@ def chat_with_context(
         f"{notes_block}"
         f"{habit_notes_block}"
         f"{bio_block}"
+        f"{routine_block}"
         f"{insights_block}"
         f"{habits_block}"
         f"{timer_block}"

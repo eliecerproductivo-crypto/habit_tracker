@@ -19,6 +19,7 @@ router = APIRouter(prefix="/profile", tags=["profile"])
 class ProfileOut(BaseModel):
     bio: str
     bio_summary: str | None
+    routine: str = ""
 
     class Config:
         from_attributes = True
@@ -26,6 +27,10 @@ class ProfileOut(BaseModel):
 
 class ProfileUpdate(BaseModel):
     bio: str = Field(max_length=5000)
+
+
+class RoutineUpdate(BaseModel):
+    routine: str = Field(max_length=5000)
 
 
 @router.get("", response_model=ProfileOut)
@@ -97,6 +102,32 @@ def summarize_profile(
 
     profile.bio_summary = summary
     profile.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(profile)
+    return profile
+
+
+@router.put("/routine", response_model=ProfileOut)
+def update_routine(
+    payload: RoutineUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Guarda la descripción de la rutina diaria del usuario."""
+    profile = (
+        db.query(models.UserProfile)
+        .filter(models.UserProfile.user_id == current_user.id)
+        .first()
+    )
+    if profile:
+        profile.routine = payload.routine
+        profile.updated_at = datetime.now(timezone.utc)
+    else:
+        profile = models.UserProfile(
+            user_id=current_user.id,
+            routine=payload.routine,
+        )
+        db.add(profile)
     db.commit()
     db.refresh(profile)
     return profile
