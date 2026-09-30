@@ -2,10 +2,21 @@ import { Pencil, Trash2, BarChart2 } from "lucide-react";
 import { categoryMeta } from "../lib/categories";
 import { DAY_LABELS, formatTime, parseDays } from "../lib/schedule";
 
+const PRIORITY_BADGES = {
+  1: { label: "Baja", bg: "bg-sky-soft", text: "text-sky" },
+  2: { label: "Intermedia", bg: "bg-signal-soft", text: "text-signal" },
+  3: { label: "Alta", bg: "bg-coral-soft", text: "text-coral font-semibold" },
+};
+
 export default function HabitCard({ habit, onEdit, onDelete, onStats }) {
   const meta = categoryMeta(habit.category);
   const Icon = meta.icon;
   const days = parseDays(habit.days_of_week);
+  const priorityInfo = PRIORITY_BADGES[habit.priority] || {
+    label: "Sin prioridad",
+    bg: "bg-panel-alt",
+    text: "text-ink-faint",
+  };
 
   return (
     <div className="flex flex-col gap-3 rounded-2xl border border-line bg-panel p-4">
@@ -51,7 +62,7 @@ export default function HabitCard({ habit, onEdit, onDelete, onStats }) {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs text-ink-soft tabular">
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 font-mono text-xs text-ink-soft tabular">
         {habit.start_time
           ? <span>{formatTime(habit.start_time)} – {formatTime(habit.end_time)}</span>
           : habit.duration_minutes
@@ -63,6 +74,11 @@ export default function HabitCard({ habit, onEdit, onDelete, onStats }) {
           style={{ backgroundColor: `var(--${meta.token}-soft)`, color: `var(--${meta.token})` }}
         >
           {meta.label}
+        </span>
+        <span
+          className={`rounded-full px-2 py-0.5 font-sans text-xs font-medium ${priorityInfo.bg} ${priorityInfo.text}`}
+        >
+          {priorityInfo.label}
         </span>
       </div>
 

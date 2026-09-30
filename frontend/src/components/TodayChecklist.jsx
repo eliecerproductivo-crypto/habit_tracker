@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, X, MinusCircle, MessageSquare, BarChart2 } from "lucide-react";
+import { Check, X, MinusCircle, MessageSquare, BarChart2, ChevronDown, ChevronUp } from "lucide-react";
 import { categoryMeta } from "../lib/categories";
 import { formatTime, toMinutes, todayLocalISODate, habitOccursOnDate, weekDatesOf } from "../lib/schedule";
 import HabitMoodModal, { getMoodInfo } from "./HabitMoodModal";
@@ -34,6 +34,7 @@ export default function TodayChecklist({ habits, logsByHabitId = {}, weekLogsByH
   const [moodModalHabit, setMoodModalHabit] = useState(null);
   const [pendingStatus, setPendingStatus]   = useState("done");
   const [statsHabit, setStatsHabit]         = useState(null);
+  const [doneExpanded, setDoneExpanded]     = useState(false);
 
   // Mon–Sun dates of the resolved week (for weekly_times quota tracking)
   const weekDates = weekDatesOf(resolvedDate);
@@ -64,14 +65,15 @@ export default function TodayChecklist({ habits, logsByHabitId = {}, weekLogsByH
       return aMin - bMin;
     });
 
+  // Separar pendientes de los que ya tienen un estado registrado
+  const pending   = todays.filter((h) => !logsByHabitId[h.id]?.status);
+  const completed = todays.filter((h) => !!logsByHabitId[h.id]?.status);
+
   const handleButtonClick = (habit, statusKey, isActive) => {
     if (isActive) {
-      // Si ya estaba activo y se toca de nuevo, se desmarca (vuelve a null)
       onSetStatus(habit.id, null);
     } else {
-      // Marcamos el estado en el log inmediatamente
       onSetStatus(habit.id, statusKey);
-      // Y abrimos el modal rápido de ánimo y nota
       setPendingStatus(statusKey);
       setMoodModalHabit(habit);
     }
@@ -94,134 +96,176 @@ export default function TodayChecklist({ habits, logsByHabitId = {}, weekLogsByH
     );
   }
 
-  return (
-    <>
-      <ul className="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-panel shadow-xs">
-        {todays.map((habit) => {
-          const meta = categoryMeta(habit.category);
-          const Icon = meta.icon;
-          const log = logsByHabitId[habit.id];
-          const currentStatus = log?.status ?? null;
-          const currentMood = log?.mood ? getMoodInfo(log.mood) : null;
-          const hasNote = Boolean(log?.note && log.note.trim());
+  // Renderiza una fila de hábito (reutilizado para pendientes y completados)
+  const renderHabitRow = (habit) => {
+    const meta = categoryMeta(habit.category);
+    const Icon = meta.icon;
+    const log = logsByHabitId[habit.id];
+    const currentStatus = log?.status ?? null;
+    const currentMood = log?.mood ? getMoodInfo(log.mood) : null;
+    const hasNote = Boolean(log?.note && log.note.trim());
 
-          return (
-            <li
-              key={habit.id}
-              className="flex items-center gap-3 px-4 py-3.5 hover:bg-panel-alt/30 transition-colors"
-            >
-              {/* Contenido del hábito (icono + nombre + hora + chip de ánimo) */}
-              <div className="flex min-w-0 flex-1 items-center gap-3">
-                {/* Category icon */}
-                <span
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
-                  style={{ backgroundColor: `var(--${meta.token}-soft)`, color: `var(--${meta.token})` }}
-                >
-                  <Icon size={15} />
-                </span>
+    return (
+      <li
+        key={habit.id}
+        className="flex items-center gap-3 px-4 py-3.5 hover:bg-panel-alt/30 transition-colors"
+      >
+        {/* Contenido del hábito */}
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <span
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+            style={{ backgroundColor: `var(--${meta.token}-soft)`, color: `var(--${meta.token})` }}
+          >
+            <Icon size={15} />
+          </span>
 
-                {/* Name + time + micro-nota */}
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className={[
-                      "truncate text-sm font-medium",
-                      currentStatus === "done"
-                        ? "text-ink-faint line-through"
-                        : currentStatus === "failed"
-                        ? "text-coral/70 line-through"
-                        : "text-ink",
-                    ].join(" ")}>
-                      {habit.name}
-                    </p>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <p className={[
+                "truncate text-sm font-medium",
+                currentStatus === "done"
+                  ? "text-ink-faint line-through"
+                  : currentStatus === "failed"
+                  ? "text-coral/70 line-through"
+                  : "text-ink",
+              ].join(" ")}>
+                {habit.name}
+              </p>
 
-                    {/* Chip de Ánimo si ya fue registrado */}
-                    {(currentMood || hasNote) && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPendingStatus(currentStatus || "done");
-                          setMoodModalHabit(habit);
-                        }}
-                        title={log?.note || currentMood?.label}
-                        className="inline-flex items-center gap-1 rounded-full bg-panel-alt border border-line px-2 py-0.5 text-[11px] text-ink hover:border-signal transition-colors cursor-pointer"
-                      >
-                        {currentMood && <span>{currentMood.emoji}</span>}
-                        {hasNote && <MessageSquare size={11} className="text-signal" />}
-                        <span className="text-[10px] font-medium text-ink-soft truncate max-w-[120px]">
-                          {log?.note || currentMood?.label}
-                        </span>
-                      </button>
-                    )}
-                  </div>
-
-                  {habit.start_time ? (
-                    <p className="font-mono text-xs text-ink-faint tabular">
-                      {formatTime(habit.start_time)} – {formatTime(habit.end_time)}
-                    </p>
-                  ) : habit.duration_minutes ? (
-                    <p className="text-xs text-ink-faint">{habit.duration_minutes} min</p>
-                  ) : null}
-
-                  {/* Weekly progress badge for weekly_times habits */}
-                  {habit.recurrence_type === "weekly_times" && (() => {
-                    const target = habit.recurrence_times_per_week ?? 1;
-                    const byDate = weekLogsByHabitId[habit.id] || {};
-                    const doneCount = weekDates.filter((iso) => byDate[iso]?.status === "done").length;
-                    return (
-                      <p className="text-xs text-ink-faint">
-                        <span className={doneCount >= target ? "text-mint font-semibold" : ""}>
-                          {doneCount}/{target}
-                        </span>
-                        {" "}esta semana
-                      </p>
-                    );
-                  })()}
-                </div>
-              </div>
-
-              {/* Acciones: botón de estadísticas + botones de estado */}
-              <div className="flex shrink-0 items-center gap-1">
+              {(currentMood || hasNote) && (
                 <button
                   type="button"
-                  onClick={() => setStatsHabit(habit)}
-                  aria-label={`Ver estadísticas de ${habit.name}`}
-                  title={`Ver estadísticas de ${habit.name}`}
-                  className="flex h-7 w-7 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-violet-soft hover:text-violet cursor-pointer"
+                  onClick={() => {
+                    setPendingStatus(currentStatus || "done");
+                    setMoodModalHabit(habit);
+                  }}
+                  title={log?.note || currentMood?.label}
+                  className="inline-flex items-center gap-1 rounded-full bg-panel-alt border border-line px-2 py-0.5 text-[11px] text-ink hover:border-signal transition-colors cursor-pointer"
                 >
-                  <BarChart2 size={15} />
+                  {currentMood && <span>{currentMood.emoji}</span>}
+                  {hasNote && <MessageSquare size={11} className="text-signal" />}
+                  <span className="text-[10px] font-medium text-ink-soft truncate max-w-[120px]">
+                    {log?.note || currentMood?.label}
+                  </span>
                 </button>
+              )}
+            </div>
 
-                {/* Status buttons — ocultos en fechas futuras */}
-                {!isFuture && (
-                  <div className="flex shrink-0 gap-1">
-                    {Object.entries(STATUS_CONFIG).map(([statusKey, cfg]) => {
-                      const BtnIcon = cfg.icon;
-                      const isActive = currentStatus === statusKey;
+            {habit.start_time ? (
+              <p className="font-mono text-xs text-ink-faint tabular">
+                {formatTime(habit.start_time)} – {formatTime(habit.end_time)}
+              </p>
+            ) : habit.duration_minutes ? (
+              <p className="text-xs text-ink-faint">{habit.duration_minutes} min</p>
+            ) : null}
 
-                      return (
-                        <button
-                          key={statusKey}
-                          onClick={() => handleButtonClick(habit, statusKey, isActive)}
-                          aria-label={cfg.label}
-                          title={cfg.label}
-                          className={[
-                            "flex h-7 w-7 items-center justify-center rounded-full border-2 transition-colors cursor-pointer",
-                            isActive
-                              ? `${cfg.activeClass}`
-                              : `border-line text-transparent ${cfg.hoverClass}`,
-                          ].join(" ")}
-                        >
-                          <BtnIcon size={13} strokeWidth={2.5} />
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+            {habit.recurrence_type === "weekly_times" && (() => {
+              const target = habit.recurrence_times_per_week ?? 1;
+              const byDate = weekLogsByHabitId[habit.id] || {};
+              const doneCount = weekDates.filter((iso) => byDate[iso]?.status === "done").length;
+              return (
+                <p className="text-xs text-ink-faint">
+                  <span className={doneCount >= target ? "text-mint font-semibold" : ""}>
+                    {doneCount}/{target}
+                  </span>
+                  {" "}esta semana
+                </p>
+              );
+            })()}
+          </div>
+        </div>
+
+        {/* Acciones */}
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setStatsHabit(habit)}
+            aria-label={`Ver estadísticas de ${habit.name}`}
+            title={`Ver estadísticas de ${habit.name}`}
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-violet-soft hover:text-violet cursor-pointer"
+          >
+            <BarChart2 size={15} />
+          </button>
+
+          {!isFuture && (
+            <div className="flex shrink-0 gap-1">
+              {Object.entries(STATUS_CONFIG).map(([statusKey, cfg]) => {
+                const BtnIcon = cfg.icon;
+                const isActive = currentStatus === statusKey;
+                return (
+                  <button
+                    key={statusKey}
+                    onClick={() => handleButtonClick(habit, statusKey, isActive)}
+                    aria-label={cfg.label}
+                    title={cfg.label}
+                    className={[
+                      "flex h-7 w-7 items-center justify-center rounded-full border-2 transition-colors cursor-pointer",
+                      isActive
+                        ? `${cfg.activeClass}`
+                        : `border-line text-transparent ${cfg.hoverClass}`,
+                    ].join(" ")}
+                  >
+                    <BtnIcon size={13} strokeWidth={2.5} />
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </li>
+    );
+  };
+
+  return (
+    <>
+      <div className="flex flex-col gap-3">
+
+        {/* ── Hábitos pendientes ── */}
+        {pending.length > 0 && (
+          <ul className="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-panel shadow-xs">
+            {pending.map(renderHabitRow)}
+          </ul>
+        )}
+
+        {/* Si todo está completado y no hay pendientes */}
+        {pending.length === 0 && completed.length > 0 && (
+          <div className="rounded-2xl border border-mint/30 bg-mint-soft px-5 py-4 text-center">
+            <p className="text-sm font-semibold text-mint">¡Todo listo por hoy! 🎉</p>
+            <p className="text-xs text-mint/70 mt-0.5">Completaste todos tus hábitos del día.</p>
+          </div>
+        )}
+
+        {/* ── Acordeón de completados ── */}
+        {completed.length > 0 && (
+          <div className="overflow-hidden rounded-2xl border border-line bg-panel shadow-xs">
+            <button
+              type="button"
+              onClick={() => setDoneExpanded((v) => !v)}
+              className="flex w-full items-center justify-between px-4 py-3 text-sm text-ink-soft hover:bg-panel-alt/40 transition-colors cursor-pointer"
+            >
+              <span className="flex items-center gap-2 font-medium">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-mint/20 text-mint">
+                  <Check size={11} strokeWidth={3} />
+                </span>
+                Ya registrados
+                <span className="rounded-full bg-panel-alt border border-line px-2 py-0.5 text-xs font-semibold text-ink-faint">
+                  {completed.length}
+                </span>
+              </span>
+              {doneExpanded
+                ? <ChevronUp size={16} className="text-ink-faint" />
+                : <ChevronDown size={16} className="text-ink-faint" />
+              }
+            </button>
+
+            {doneExpanded && (
+              <ul className="divide-y divide-line border-t border-line">
+                {completed.map(renderHabitRow)}
+              </ul>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Modal de Ánimo y Nota */}
       {moodModalHabit && (

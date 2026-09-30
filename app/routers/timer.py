@@ -73,6 +73,8 @@ def create_timer_session(
             log.status = "done"
             if payload.notes and not log.note:
                 log.note = payload.notes
+            if payload.mood:
+                log.mood = payload.mood
             log.logged_at = datetime.now(timezone.utc)
         else:
             log = models.HabitLog(
@@ -81,6 +83,7 @@ def create_timer_session(
                 date=target_date,
                 status="done",
                 note=payload.notes or "",
+                mood=payload.mood or None,
             )
             db.add(log)
 

@@ -300,6 +300,12 @@ _DAYS_MAP = {
     "6": "Sáb",
 }
 
+_PRIORITY_LABELS = {
+    1: "Baja",
+    2: "Intermedia",
+    3: "Alta",
+}
+
 
 def _make_csv(headers: list[str], rows: list[list]) -> bytes:
     """Genera un CSV codificado en UTF-8 con BOM para compatibilidad con Excel."""
@@ -334,6 +340,7 @@ def export_data(
             "Nombre",
             "Descripción",
             "Categoría",
+            "Prioridad",
             "Días",
             "Hora inicio",
             "Hora fin",
@@ -351,6 +358,7 @@ def export_data(
                 h.name,
                 h.description or "",
                 h.category,
+                _PRIORITY_LABELS.get(h.priority, ""),
                 ", ".join(
                     _DAYS_MAP.get(d.strip(), d.strip())
                     for d in (h.days_of_week or "").split(",")
@@ -457,17 +465,42 @@ def export_data(
         .filter(models.UserProfile.user_id == uid)
         .first()
     )
-    profile_csv = _make_csv(
-        ["Campo", "Valor"],
-        [
-            ["Nombre", current_user.name],
-            ["Correo", current_user.email],
-            ["Cuenta creada", current_user.created_at.strftime("%Y-%m-%d") if current_user.created_at else ""],
-            ["Bio", profile.bio if profile else ""],
-            ["Resumen IA", profile.bio_summary if profile and profile.bio_summary else ""],
-            ["Perfil actualizado", profile.updated_at.strftime("%Y-%m-%d %H:%M") if profile and profile.updated_at else ""],
-        ],
+    insights_row = (
+        db.query(models.UserInsights)
+        .filter(models.UserInsights.user_id == uid)
+        .first()
     )
+    insights_data: dict = {}
+    if insights_row:
+        try:
+            insights_data = json.loads(insights_row.insights_json)
+        except Exception:
+            insights_data = {}
+
+    _insight_labels = {
+        "desires":     "Deseos/compras",
+        "goals":       "Metas y objetivos",
+        "worries":     "Preocupaciones",
+        "facts":       "Datos personales",
+        "preferences": "Preferencias",
+    }
+
+    profile_rows = [
+        ["Nombre", current_user.name],
+        ["Correo", current_user.email],
+        ["Cuenta creada", current_user.created_at.strftime("%Y-%m-%d") if current_user.created_at else ""],
+        ["Bio", profile.bio if profile else ""],
+        ["Bio resumen IA", profile.bio_summary if profile and profile.bio_summary else ""],
+        ["Rutina", profile.routine if profile and profile.routine else ""],
+        ["Rutina resumen IA", profile.routine_summary if profile and getattr(profile, "routine_summary", None) else ""],
+        ["Perfil actualizado", profile.updated_at.strftime("%Y-%m-%d %H:%M") if profile and profile.updated_at else ""],
+    ]
+    # Agregar cada categoría de insights como fila separada
+    for key, label in _insight_labels.items():
+        items = insights_data.get(key, [])
+        profile_rows.append([f"Insights – {label}", "; ".join(items) if items else ""])
+
+    profile_csv = _make_csv(["Campo", "Valor"], profile_rows)
 
     # ── Empaquetar en ZIP ───────────────────────────────────────────────────
     zip_buf = io.BytesIO()

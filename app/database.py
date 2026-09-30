@@ -127,6 +127,10 @@ def _migrate(connection):
             connection.execute(text(
                 "ALTER TABLE habits ADD COLUMN recurrence_day_of_month INTEGER DEFAULT NULL"
             ))
+        if "priority" not in habit_cols:
+            connection.execute(text(
+                "ALTER TABLE habits ADD COLUMN priority INTEGER DEFAULT NULL"
+            ))
 
     # ── categories: unique constraint (user_id, name) ─────────────────────────
     if "categories" in tables:

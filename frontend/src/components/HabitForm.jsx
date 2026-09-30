@@ -1,12 +1,21 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Plus, Check } from "lucide-react";
+import { ChevronDown, Plus, Check, AlertTriangle } from "lucide-react";
 import { DAY_LABELS } from "../lib/schedule";
 import { useCategories } from "../hooks/useCategories";
+import { useHabitsContext } from "../context/HabitsContext";
+
+export const PRIORITY_OPTIONS = [
+  { value: null, label: "Sin prioridad" },
+  { value: 1, label: "Baja" },
+  { value: 2, label: "Intermedia" },
+  { value: 3, label: "Alta" },
+];
 
 const EMPTY = {
   name: "",
   description: "",
   category: "",
+  priority: null,
   days_of_week: [1, 2, 3, 4, 5],
   has_time: false,
   start_time: "08:00",
@@ -157,11 +166,18 @@ function CategorySelect({ value, onChange }) {
 // ── Main form ─────────────────────────────────────────────────────────────────
 export default function HabitForm({ initial, onSubmit, onCancel, submitLabel = "Guardar hábito" }) {
   const hasLogs = Boolean(initial?.has_logs);
+  const habitsContext = useHabitsContext();
+  const allHabits = habitsContext?.habits || [];
+  const otherHighPriorityCount = allHabits.filter(
+    (h) => h.is_active !== false && h.priority === 3 && h.id !== initial?.id
+  ).length;
+
   const [form, setForm] = useState(() => {
     if (!initial) return EMPTY;
     return {
       ...EMPTY,
       ...initial,
+      priority: initial.priority ?? null,
       has_time: !!(initial.start_time),
       duration_minutes: initial.duration_minutes ? String(initial.duration_minutes) : "",
       days_of_week: Array.isArray(initial.days_of_week)
@@ -209,6 +225,7 @@ export default function HabitForm({ initial, onSubmit, onCancel, submitLabel = "
     try {
       await onSubmit({
         ...form,
+        priority: form.priority !== null && form.priority !== undefined ? Number(form.priority) : null,
         start_time: form.has_time ? form.start_time : null,
         end_time: form.has_time ? form.end_time : null,
         duration_minutes: !form.has_time && form.duration_minutes ? Number(form.duration_minutes) : null,
@@ -249,6 +266,43 @@ export default function HabitForm({ initial, onSubmit, onCancel, submitLabel = "
       <div>
         <label className="mb-1 block text-xs font-medium text-ink-soft">Categoría</label>
         <CategorySelect value={form.category} onChange={(v) => set("category", v)} />
+      </div>
+
+      <div>
+        <label className="mb-1.5 block text-xs font-medium text-ink-soft">Prioridad</label>
+        <div className="grid grid-cols-4 gap-1.5">
+          {PRIORITY_OPTIONS.map((opt) => {
+            const isSelected = form.priority === opt.value;
+            let activeStyle = "bg-ink text-bg font-bold";
+            if (opt.value === 1) activeStyle = "bg-sky text-white font-bold";
+            if (opt.value === 2) activeStyle = "bg-signal text-white font-bold";
+            if (opt.value === 3) activeStyle = "bg-coral text-white font-bold";
+
+            return (
+              <button
+                key={String(opt.value)}
+                type="button"
+                onClick={() => set("priority", opt.value)}
+                className={[
+                  "py-2 px-1 text-xs font-semibold rounded-lg transition-colors cursor-pointer text-center",
+                  isSelected
+                    ? `${activeStyle} shadow-sm`
+                    : "bg-panel-alt text-ink-faint hover:text-ink hover:bg-panel",
+                ].join(" ")}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+        {form.priority === 3 && otherHighPriorityCount >= 5 && (
+          <div className="mt-2.5 flex items-start gap-2 rounded-lg border border-signal/40 bg-signal-soft p-2.5 text-xs text-signal">
+            <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+            <p>
+              Ya tienes {otherHighPriorityCount} hábitos activos con prioridad Alta. Si todo es prioridad alta, la prioridad pierde sentido.
+            </p>
+          </div>
+        )}
       </div>
 
       <div>

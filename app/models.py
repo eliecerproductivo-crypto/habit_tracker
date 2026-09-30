@@ -72,6 +72,8 @@ class Habit(Base):
     recurrence_times_per_week = Column(Integer, nullable=True, default=None)
     # duration in minutes for habits without a fixed time (e.g. "study 30 min any time")
     duration_minutes = Column(Integer, nullable=True, default=None)
+    # priority: 1=Baja, 2=Intermedia, 3=Alta (None = Sin prioridad)
+    priority = Column(Integer, nullable=True, default=None)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     owner = relationship("User", back_populates="habits")

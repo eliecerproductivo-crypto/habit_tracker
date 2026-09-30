@@ -109,6 +109,7 @@ export default function Timer() {
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [sessionToSave, setSessionToSave] = useState(null);
   const [saveNotes, setSaveNotes] = useState("");
+  const [saveMood, setSaveMood] = useState("");
   const [autoMarkDone, setAutoMarkDone] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -277,6 +278,7 @@ export default function Timer() {
         session_type: sessionToSave.session_type,
         notes: saveNotes.trim(),
         auto_mark_done: autoMarkDone && !!sessionToSave.habit_id,
+        mood: autoMarkDone && sessionToSave.habit_id && saveMood ? saveMood : null,
         log_date: todayLocalISODate(),
       });
 
@@ -288,6 +290,7 @@ export default function Timer() {
       setSaveModalOpen(false);
       setSessionToSave(null);
       setSaveNotes("");
+      setSaveMood("");
       handleReset();
     } catch (err) {
       alert("Error al guardar la sesión: " + (err?.response?.data?.detail || err.message));
@@ -819,6 +822,37 @@ export default function Timer() {
               </label>
             )}
 
+            {/* Selector de estado de ánimo (solo si se marca como completado) */}
+            {sessionToSave.habit_id && autoMarkDone && (
+              <div className="mt-3">
+                <p className="text-xs font-semibold text-ink-soft mb-2">¿Cómo te sentiste?</p>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { key: "great",   emoji: "😄", label: "Genial"  },
+                    { key: "good",    emoji: "🙂", label: "Bien"    },
+                    { key: "neutral", emoji: "😐", label: "Normal"  },
+                    { key: "tired",   emoji: "😴", label: "Cansado" },
+                    { key: "hard",    emoji: "😤", label: "Difícil" },
+                  ].map(({ key, emoji, label }) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setSaveMood(saveMood === key ? "" : key)}
+                      className={[
+                        "flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer",
+                        saveMood === key
+                          ? "border-signal bg-signal/10 text-signal"
+                          : "border-line bg-panel-alt text-ink-soft hover:border-signal/50 hover:text-ink",
+                      ].join(" ")}
+                    >
+                      <span>{emoji}</span>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Nota opcional */}
             <div className="mt-4">
               <label className="block text-xs font-semibold text-ink-soft mb-1">
@@ -840,6 +874,7 @@ export default function Timer() {
                 onClick={() => {
                   setSaveModalOpen(false);
                   setSessionToSave(null);
+                  setSaveMood("");
                   handleReset();
                 }}
                 disabled={isSaving}

@@ -49,6 +49,7 @@ class HabitBase(BaseModel):
     recurrence_day_of_month: Optional[int] = Field(default=None, ge=-1, le=31)
     recurrence_times_per_week: Optional[int] = Field(default=None, ge=1, le=7)
     duration_minutes: Optional[int] = Field(default=None, ge=1, le=480)
+    priority: Optional[int] = Field(default=None, ge=1, le=3)
 
     @field_validator("days_of_week")
     @classmethod
@@ -85,6 +86,7 @@ class HabitOut(HabitBase):
     recurrence_interval: Optional[int] = None
     recurrence_day_of_month: Optional[int] = None
     recurrence_times_per_week: Optional[int] = None
+    priority: Optional[int] = None
     has_logs: bool = False
 
     class Config:
@@ -222,6 +224,7 @@ class TimerSessionCreate(BaseModel):
     notes: Optional[str] = Field(default="", max_length=500)
     auto_mark_done: bool = False
     log_date: Optional[date] = None
+    mood: Optional[str] = Field(default=None, max_length=20)  # estado de ánimo al marcar como hecho
 
 
 class TimerSessionOut(BaseModel):
