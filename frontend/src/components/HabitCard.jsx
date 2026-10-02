@@ -108,6 +108,10 @@ export default function HabitCard({ habit, onEdit, onDelete, onStats }) {
             ? "Último día del mes"
             : `Día ${habit.recurrence_day_of_month} de cada mes`}
         </p>
+      ) : habit.recurrence_type === "weekly_times" ? (
+        <p className="text-xs text-ink-faint">
+          {habit.recurrence_times_per_week ?? 1} {(habit.recurrence_times_per_week ?? 1) === 1 ? "vez" : "veces"} por semana
+        </p>
       ) : null}
     </div>
   );

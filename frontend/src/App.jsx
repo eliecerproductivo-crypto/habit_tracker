@@ -1,4 +1,5 @@
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { useRef } from "react";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { ThemeProvider } from "./context/ThemeContext";
 import { HabitsProvider } from "./context/HabitsContext";
@@ -27,6 +28,9 @@ function FullScreenLoader() {
 // Páginas protegidas con sus rutas. Se renderizan TODAS siempre;
 // la que no está activa se oculta con CSS (display:none) para que
 // el estado interno (timer corriendo, chat, etc.) nunca se destruya.
+// Usamos "lazy mount": una página se monta la primera vez que se visita
+// y luego se mantiene viva (oculta) — así los hooks de páginas no activas
+// no hacen fetch al inicio de la sesión.
 const PROTECTED_PAGES = [
   { path: "/",             Page: Dashboard, exact: true },
   { path: "/habitos",      Page: Habits },
@@ -47,6 +51,20 @@ function ProtectedApp() {
 
   // HabitsProvider wraps everything so all pages share a single /habits fetch.
   // Placed inside the auth guard so it only runs when the user is logged in.
+
+  // Lazy mount: track which paths have been visited at least once.
+  // A page is only mounted after its first visit; then kept alive (hidden) to
+  // preserve state (timer, chat history, etc.) without re-fetching on every nav.
+  const visitedRef = useRef(new Set());
+
+  // Mark the currently active path as visited before rendering
+  PROTECTED_PAGES.forEach(({ path, exact }) => {
+    const isActive = exact
+      ? location.pathname === path
+      : location.pathname === path || location.pathname.startsWith(path + "/");
+    if (isActive) visitedRef.current.add(path);
+  });
+
   return (
     <HabitsProvider>
       <AppShell activePath={location.pathname}>
@@ -54,6 +72,8 @@ function ProtectedApp() {
           const isActive = exact
             ? location.pathname === path
             : location.pathname === path || location.pathname.startsWith(path + "/");
+          // Only mount once visited; keep mounted after first visit
+          if (!isActive && !visitedRef.current.has(path)) return null;
           return (
             <div key={path} className={isActive ? "contents" : "hidden"}>
               <Page />

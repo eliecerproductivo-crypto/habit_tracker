@@ -13,8 +13,11 @@ from app import models
 
 SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
-    # Falls back to a dev-only secret so local `uvicorn` runs work out of the box.
-    # ALWAYS set a real SECRET_KEY env var in production (Vercel project settings).
+    import logging as _logging
+    _logging.getLogger(__name__).warning(
+        "SECRET_KEY no está definido. Usando clave insegura de desarrollo. "
+        "Define SECRET_KEY en las variables de entorno antes de ir a producción."
+    )
     SECRET_KEY = "dev-only-insecure-secret-change-me"
 
 ALGORITHM = "HS256"

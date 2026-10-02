@@ -170,6 +170,11 @@ def use_wildcard(
     # ── Validaciones de saldo / regla anti-consecutivo ─────────────────────
     if wb.balance <= 0:
         raise HTTPException(status_code=400, detail="No tienes comodines disponibles.")
+    if wb.last_used_date == today:
+        raise HTTPException(
+            status_code=400,
+            detail="Ya usaste un comodín hoy.",
+        )
     if wb.last_used_date == yesterday:
         raise HTTPException(
             status_code=400,

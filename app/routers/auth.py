@@ -177,6 +177,9 @@ def reset_password(
         .first()
     )
 
+    if not reset_token:
+        raise HTTPException(status_code=400, detail="Token inválido o ya usado.")
+
     expires_at = reset_token.expires_at
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)

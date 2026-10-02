@@ -281,6 +281,8 @@ def compute_user_stats(db: Session, user: models.User) -> schemas.StatsSummary:
     best_streak = 0
     running = 0
     cursor = today - timedelta(days=MAX_LOOKBACK_DAYS)
+    # Incluir hoy en el rango si ya está completo; si es None (sin programación)
+    # o False (incompleto) usar ayer como límite para no contar el día parcial.
     end_date = today if today_status is True else today - timedelta(days=1)
     while cursor <= end_date:
         status = day_status_combined(cursor)
@@ -529,6 +531,10 @@ def habit_stats(
             if d < effective_start:
                 return False
             return _habit_occurs_on_date(habit, d)
+
+        # Inicializar contadores para evitar UnboundLocalError si no hay logs
+        total_done = 0
+        total_scheduled = 0
 
         # ── Racha actual ──────────────────────────────────────────────────────
         current_streak = 0

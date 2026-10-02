@@ -229,7 +229,7 @@ export default function HabitForm({ initial, onSubmit, onCancel, submitLabel = "
         start_time: form.has_time ? form.start_time : null,
         end_time: form.has_time ? form.end_time : null,
         duration_minutes: !form.has_time && form.duration_minutes ? Number(form.duration_minutes) : null,
-        days_of_week: form.recurrence_type === "weekly" ? form.days_of_week.join(",") : "0",
+        days_of_week: form.recurrence_type === "weekly" ? form.days_of_week.join(",") : "0,1,2,3,4,5,6",
         recurrence_interval: form.recurrence_type === "interval" ? Number(form.recurrence_interval) : null,
         recurrence_day_of_month: form.recurrence_type === "monthly" ? Number(form.recurrence_day_of_month) : null,
         recurrence_times_per_week: form.recurrence_type === "weekly_times" ? Number(form.recurrence_times_per_week) : null,
