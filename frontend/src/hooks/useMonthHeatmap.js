@@ -97,6 +97,7 @@ export function useYearHeatmap(habits) {
           const weekSunIso = formatLocalDate(weekSunD);
 
           let doneCount = 0;
+          let skippedCount = 0;
           for (let di = 0; di < 7; di++) {
             const dayD = new Date(weekMon);
             dayD.setDate(dayD.getDate() + di);
@@ -104,13 +105,15 @@ export function useYearHeatmap(habits) {
             if (dayIso < effectiveStart) continue;
             if (dayIso > today) break;
             if (logMap[dayIso]?.[h.id] === "done") doneCount++;
+            else if (logMap[dayIso]?.[h.id] === "skipped") skippedCount++;
           }
 
           if (!weekStatusByHabit[monKey]) weekStatusByHabit[monKey] = {};
           if (doneCount >= target) {
             weekStatusByHabit[monKey][h.id] = "met";
           } else if (weekSunIso < today) {
-            weekStatusByHabit[monKey][h.id] = "failed";
+            // Opción A: si hay al menos un skipped pero cero done → omitida (neutral)
+            weekStatusByHabit[monKey][h.id] = (doneCount === 0 && skippedCount > 0) ? "skipped" : "failed";
           } else {
             weekStatusByHabit[monKey][h.id] = "in_progress";
           }
@@ -166,10 +169,12 @@ export function useYearHeatmap(habits) {
 
         let wtFailed = false;
         let wtAllMet = hasWt;
+        let wtAllSkipped = hasWt;
         for (const h of relevantWt) {
           const ws = weekStatusByHabit[monIso]?.[h.id];
-          if (ws === "failed") { wtFailed = true; wtAllMet = false; break; }
+          if (ws === "failed") { wtFailed = true; wtAllMet = false; wtAllSkipped = false; break; }
           if (ws !== "met") wtAllMet = false;
+          if (ws !== "skipped") wtAllSkipped = false;
         }
 
         let status;
@@ -178,10 +183,12 @@ export function useYearHeatmap(habits) {
         } else if (!hasRegular) {
           if (wtFailed) status = "failed";
           else if (wtAllMet) status = "complete";
+          else if (wtAllSkipped) status = "skipped";
           else status = "empty";
         } else {
           if (!regularOk || wtFailed) status = "failed";
           else if (regularOk && wtAllMet) status = "complete";
+          else if (regularOk && wtAllSkipped) status = "skipped";
           else status = regularOk ? "complete" : "failed";
         }
 

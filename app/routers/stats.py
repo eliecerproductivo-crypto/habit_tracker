@@ -177,8 +177,9 @@ def _weekly_times_week_status(
     if effective_start > week_end:
         return None
 
-    # Count "done" logs in this week
+    # Count "done" and "skipped" logs in this week
     done_count = 0
+    skipped_count = 0
     for i in range(7):
         d = week_start_date + timedelta(days=i)
         if d < effective_start:
@@ -188,13 +189,19 @@ def _weekly_times_week_status(
         s = status_by_date.get(d, {}).get(h.id)
         if s == "done":
             done_count += 1
+        elif s == "skipped":
+            skipped_count += 1
 
     if done_count >= target:
         return True
-    # Only mark as failed if the entire week is strictly in the past
+    # Only evaluate past weeks
     if week_end < today:
+        # If the user logged at least one skipped but never done → treat as skipped (neutral)
+        # "I couldn't do it" is different from "I ignored it entirely"
+        if done_count == 0 and skipped_count > 0:
+            return "skipped"
         return False
-    # Week still in progress (includes today being any day Mon–Sun) — not a failure yet
+    # Week still in progress — not a failure yet
     return None
 
 
@@ -219,9 +226,11 @@ def compute_user_stats(db: Session, user: models.User) -> schemas.StatsSummary:
         Combines per-day status (weekly/interval/monthly habits) with
         the weekly quota status of weekly_times habits.
 
-        For weekly_times: a habit counts as "done" for every day of a week
-        where its quota was met, and as "failed" for every day of a past week
-        where it wasn't. This way the global streak is consistent.
+        For weekly_times:
+          - True  → quota met, counts as done
+          - False → quota missed and no skipped logs → day is failed
+          - "skipped" → user marked skipped but never done → neutral (like skipped)
+          - None  → week in progress, no penalty
         """
         base = _day_status(d, habits_by_weekday, non_weekly, status_by_date)
 
@@ -232,24 +241,28 @@ def compute_user_stats(db: Session, user: models.User) -> schemas.StatsSummary:
         wt_statuses = [wt_week_status[yw].get(h.id) for h in weekly_times_habits
                        if (h.start_date or h.created_at.date()) <= d]
 
-        # Filter out habits that didn't exist yet
+        # Filter out habits that didn't exist yet (None from missing key)
         relevant = [s for s in wt_statuses if s is not None]
 
         if not relevant:
-            # No weekly_times habit existed/evaluated this day
             return base
 
-        # If any weekly_times habit failed its quota this week → day is failed
+        # Evaluate wt result:
+        # - any hard False (no logs at all) → failed
+        # - all True → done
+        # - mix of True/"skipped" with no False → treat as skipped (neutral)
+        # - anything else (in progress) → None
         if False in relevant:
             wt_result = False
-        # If all met quota → day is done from wt perspective
         elif all(s is True for s in relevant):
             wt_result = True
+        elif all(s is True or s == "skipped" for s in relevant):
+            # User tried (skipped some days) but didn't complete — neutral, no streak break
+            wt_result = "skipped"
         else:
-            # Some in progress (None after filtering shouldn't happen but be safe)
             wt_result = None
 
-        # Merge with base (per-day habits)
+        # Merge with base
         if base is False or wt_result is False:
             return False
         if base is True and wt_result is True:
@@ -258,6 +271,9 @@ def compute_user_stats(db: Session, user: models.User) -> schemas.StatsSummary:
             return True
         if base is True and wt_result is None:
             return True   # week still in progress, don't penalize daily habits
+        # wt was skipped → treat the whole day as skipped (neutral, no streak break)
+        if wt_result == "skipped":
+            return None   # None = "no data / neutral" for streak purposes
         return None  # nothing scheduled or week still in progress
 
     today_status = day_status_combined(today)
