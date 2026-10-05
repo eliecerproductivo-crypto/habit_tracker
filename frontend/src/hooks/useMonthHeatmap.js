@@ -112,9 +112,9 @@ export function useYearHeatmap(habits) {
           if (doneCount >= target) {
             weekStatusByHabit[monKey][h.id] = "met";
           } else if (weekSunIso < today) {
-            // Si hay al menos 1 skipped (con o sin done) → ámbar (lo intentó)
-            // Si no hay ningún log → rojo (lo ignoró)
-            weekStatusByHabit[monKey][h.id] = skippedCount > 0 ? "skipped" : "failed";
+            // Si hay al menos 1 skipped → el usuario registró que no pudo → verde (cumplió)
+            // Sin ningún log → rojo (lo ignoró)
+            weekStatusByHabit[monKey][h.id] = skippedCount > 0 ? "met" : "failed";
           } else {
             weekStatusByHabit[monKey][h.id] = "in_progress";
           }
@@ -170,12 +170,10 @@ export function useYearHeatmap(habits) {
 
         let wtFailed = false;
         let wtAllMet = hasWt;
-        let wtAllSkipped = hasWt;
         for (const h of relevantWt) {
           const ws = weekStatusByHabit[monIso]?.[h.id];
-          if (ws === "failed") { wtFailed = true; wtAllMet = false; wtAllSkipped = false; break; }
+          if (ws === "failed") { wtFailed = true; wtAllMet = false; break; }
           if (ws !== "met") wtAllMet = false;
-          if (ws !== "skipped") wtAllSkipped = false;
         }
 
         let status;
@@ -184,12 +182,10 @@ export function useYearHeatmap(habits) {
         } else if (!hasRegular) {
           if (wtFailed) status = "failed";
           else if (wtAllMet) status = "complete";
-          else if (wtAllSkipped) status = "skipped";
           else status = "empty";
         } else {
           if (!regularOk || wtFailed) status = "failed";
           else if (regularOk && wtAllMet) status = "complete";
-          else if (regularOk && wtAllSkipped) status = "skipped";
           else status = regularOk ? "complete" : "failed";
         }
 
