@@ -196,9 +196,10 @@ def _weekly_times_week_status(
         return True
     # Only evaluate past weeks
     if week_end < today:
-        # If the user logged at least one skipped but never done → treat as skipped (neutral)
-        # "I couldn't do it" is different from "I ignored it entirely"
-        if done_count == 0 and skipped_count > 0:
+        # Si hizo al menos 1 y los demás los marcó skipped → ámbar (lo intentó)
+        # Si hizo 0 pero marcó al menos 1 skipped → ámbar (no pudo)
+        # Si no hay ningún log → rojo (lo ignoró)
+        if skipped_count > 0:
             return "skipped"
         return False
     # Week still in progress — not a failure yet

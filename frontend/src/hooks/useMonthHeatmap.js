@@ -112,8 +112,9 @@ export function useYearHeatmap(habits) {
           if (doneCount >= target) {
             weekStatusByHabit[monKey][h.id] = "met";
           } else if (weekSunIso < today) {
-            // Opción A: si hay al menos un skipped pero cero done → omitida (neutral)
-            weekStatusByHabit[monKey][h.id] = (doneCount === 0 && skippedCount > 0) ? "skipped" : "failed";
+            // Si hay al menos 1 skipped (con o sin done) → ámbar (lo intentó)
+            // Si no hay ningún log → rojo (lo ignoró)
+            weekStatusByHabit[monKey][h.id] = skippedCount > 0 ? "skipped" : "failed";
           } else {
             weekStatusByHabit[monKey][h.id] = "in_progress";
           }
