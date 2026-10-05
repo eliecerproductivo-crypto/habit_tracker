@@ -346,6 +346,7 @@ def export_data(
             "Hora fin",
             "Duración (min)",
             "Recurrencia",
+            "Veces por semana",
             "Intervalo (días)",
             "Día del mes",
             "Fecha inicio",
@@ -368,6 +369,7 @@ def export_data(
                 h.end_time or "",
                 h.duration_minutes if h.duration_minutes is not None else "",
                 h.recurrence_type,
+                h.recurrence_times_per_week if h.recurrence_times_per_week is not None else "",
                 h.recurrence_interval if h.recurrence_interval is not None else "",
                 h.recurrence_day_of_month if h.recurrence_day_of_month is not None else "",
                 str(h.start_date) if h.start_date else "",
@@ -388,9 +390,11 @@ def export_data(
         .all()
     )
     logs_csv = _make_csv(
-        ["Fecha", "Hábito", "Estado", "Estado de ánimo", "Nota", "Registrado en"],
+        ["ID Log", "ID Hábito", "Fecha", "Hábito", "Estado", "Estado de ánimo", "Nota", "Registrado en"],
         [
             [
+                log.id,
+                log.habit_id,
                 str(log.date),
                 habit_name,
                 _STATUS_LABELS.get(log.status, log.status),
@@ -502,6 +506,45 @@ def export_data(
 
     profile_csv = _make_csv(["Campo", "Valor"], profile_rows)
 
+    # ── 6. resumenes_diario.csv ─────────────────────────────────────────────
+    summaries = (
+        db.query(models.JournalSummary)
+        .filter(models.JournalSummary.user_id == uid)
+        .order_by(models.JournalSummary.date_from.asc())
+        .all()
+    )
+    summaries_csv = _make_csv(
+        ["Desde", "Hasta", "Resumen IA", "Generado en"],
+        [
+            [
+                str(s.date_from),
+                str(s.date_to),
+                s.summary,
+                s.created_at.strftime("%Y-%m-%d %H:%M") if s.created_at else "",
+            ]
+            for s in summaries
+        ],
+    )
+
+    # ── 7. categorias.csv ───────────────────────────────────────────────────
+    categories = (
+        db.query(models.Category)
+        .filter(models.Category.user_id == uid)
+        .order_by(models.Category.name.asc())
+        .all()
+    )
+    categories_csv = _make_csv(
+        ["ID", "Nombre", "Creada en"],
+        [
+            [
+                c.id,
+                c.name,
+                c.created_at.strftime("%Y-%m-%d %H:%M") if c.created_at else "",
+            ]
+            for c in categories
+        ],
+    )
+
     # ── Empaquetar en ZIP ───────────────────────────────────────────────────
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
@@ -509,6 +552,8 @@ def export_data(
         zf.writestr("historial_habitos.csv", logs_csv)
         zf.writestr("sesiones_temporizador.csv", sessions_csv)
         zf.writestr("diario.csv", journal_csv)
+        zf.writestr("resumenes_diario.csv", summaries_csv)
+        zf.writestr("categorias.csv", categories_csv)
         zf.writestr("perfil.csv", profile_csv)
 
     return Response(

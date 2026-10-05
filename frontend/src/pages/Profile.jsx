@@ -351,6 +351,8 @@ export default function Profile() {
           <span className="rounded-md bg-bg border border-line px-2 py-0.5 text-xs text-ink-faint">historial_habitos.csv</span>
           <span className="rounded-md bg-bg border border-line px-2 py-0.5 text-xs text-ink-faint">sesiones_temporizador.csv</span>
           <span className="rounded-md bg-bg border border-line px-2 py-0.5 text-xs text-ink-faint">diario.csv</span>
+          <span className="rounded-md bg-bg border border-line px-2 py-0.5 text-xs text-ink-faint">resumenes_diario.csv</span>
+          <span className="rounded-md bg-bg border border-line px-2 py-0.5 text-xs text-ink-faint">categorias.csv</span>
           <span className="rounded-md bg-bg border border-line px-2 py-0.5 text-xs text-ink-faint">perfil.csv</span>
         </div>
 
