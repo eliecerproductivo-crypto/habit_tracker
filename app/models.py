@@ -235,6 +235,28 @@ class UserInsights(Base):
     owner = relationship("User", foreign_keys=[user_id])
 
 
+class TodoItem(Base):
+    """
+    Tarea simple de lista de pendientes (to-do).
+    No está vinculada a hábitos — sirve para recordatorios generales.
+    """
+    __tablename__ = "todo_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    text = Column(String(500), nullable=False)
+    done = Column(Boolean, nullable=False, default=False)
+    # Fecha límite opcional (solo la fecha, sin hora)
+    due_date = Column(Date, nullable=True, default=None)
+    # Prioridad: 1=Baja, 2=Media, 3=Alta (None = sin prioridad)
+    priority = Column(Integer, nullable=True, default=None)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc))
+
+    owner = relationship("User", foreign_keys=[user_id])
+
+
 class TimerSession(Base):
     __tablename__ = "timer_sessions"
 

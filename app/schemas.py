@@ -274,3 +274,31 @@ class WildcardStatus(BaseModel):
 
 class WildcardUseRequest(BaseModel):
     date: date                            # fecha para la que se activa el comodín
+
+
+# ---------- To-Do ----------
+
+class TodoCreate(BaseModel):
+    text: str = Field(min_length=1, max_length=500)
+    due_date: Optional[date] = None
+    priority: Optional[int] = Field(default=None, ge=1, le=3)
+
+
+class TodoUpdate(BaseModel):
+    text: Optional[str] = Field(default=None, min_length=1, max_length=500)
+    done: Optional[bool] = None
+    due_date: Optional[date] = None
+    priority: Optional[int] = Field(default=None, ge=1, le=3)
+
+
+class TodoOut(BaseModel):
+    id: int
+    text: str
+    done: bool
+    due_date: Optional[date] = None
+    priority: Optional[int] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
