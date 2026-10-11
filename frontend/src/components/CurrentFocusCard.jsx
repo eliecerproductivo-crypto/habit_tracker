@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { Check, X, MinusCircle, ArrowRight } from "lucide-react";
 import DayRail from "./DayRail";
+import HabitMoodModal from "./HabitMoodModal";
 import { categoryMeta } from "../lib/categories";
 import { formatTime, getCurrentAndNext, formatDateLabel, todayLocalISODate } from "../lib/schedule";
 import { useNow } from "../hooks/useNow";
@@ -31,6 +33,27 @@ const STATUS_CONFIG = [
 export default function CurrentFocusCard({ habits, logsByHabitId = {}, onSetStatus, date }) {
   const now = useNow();
   const isToday = !date || date === todayLocalISODate();
+
+  // Estado para el modal de ánimo/energía
+  const [moodModalHabit, setMoodModalHabit] = useState(null);
+  const [pendingStatus, setPendingStatus]   = useState("done");
+
+  const handleStatusClick = (habit, statusKey, isActive) => {
+    if (isActive) {
+      onSetStatus(habit.id, null);
+    } else {
+      onSetStatus(habit.id, statusKey);
+      setPendingStatus(statusKey);
+      setMoodModalHabit(habit);
+    }
+  };
+
+  const handleSaveMood = (data) => {
+    if (moodModalHabit) {
+      onSetStatus(moodModalHabit.id, pendingStatus, data);
+    }
+    setMoodModalHabit(null);
+  };
   const { current, next } = isToday ? getCurrentAndNext(habits, now) : { current: null, next: null };
 
   const clock = now.toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
@@ -88,7 +111,7 @@ export default function CurrentFocusCard({ habits, logsByHabitId = {}, onSetStat
                   <button
                     key={key}
                     disabled={!isToday}
-                    onClick={() => isToday && onSetStatus(current.id, isActive ? null : key)}
+                    onClick={() => isToday && handleStatusClick(current, key, isActive)}
                     className={[
                       "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors",
                       isToday
@@ -143,6 +166,19 @@ export default function CurrentFocusCard({ habits, logsByHabitId = {}, onSetStat
           )}
         />
       </div>
+
+      {/* Modal de ánimo/energía tras completar desde el bloque actual */}
+      {moodModalHabit && (
+        <HabitMoodModal
+          isOpen={Boolean(moodModalHabit)}
+          habit={moodModalHabit}
+          status={pendingStatus}
+          initialMood={logsByHabitId[moodModalHabit.id]?.mood || null}
+          initialNote={logsByHabitId[moodModalHabit.id]?.note || ""}
+          onSave={handleSaveMood}
+          onClose={() => setMoodModalHabit(null)}
+        />
+      )}
     </section>
   );
 }

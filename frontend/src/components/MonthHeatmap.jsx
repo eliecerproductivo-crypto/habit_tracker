@@ -53,7 +53,7 @@ export default function MonthHeatmap({ habits, todayStatus }) {
 
   if (loading && days.length === 0) {
     return (
-      <div className="rounded-2xl border border-line bg-panel p-4 md:p-5 min-h-[175px] flex flex-col justify-between">
+      <div className="rounded-2xl border border-line bg-panel p-4 md:p-5 min-h-43.75 flex flex-col justify-between">
         <p className="text-xs text-ink-faint">Cargando actividad…</p>
         <div className="mt-3 flex gap-0.5 overflow-hidden opacity-30">
           {Array.from({ length: 52 }).map((_, i) => (
@@ -121,7 +121,7 @@ export default function MonthHeatmap({ habits, todayStatus }) {
   const LABEL_W = 18;   // px reservados para etiquetas de días
 
   return (
-    <div className="rounded-2xl border border-line bg-panel p-4 md:p-5 min-h-[175px]">
+    <div className="rounded-2xl border border-line bg-panel p-4 md:p-5 min-h-43.75">
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <p className="text-xs font-semibold text-ink">Actividad del año</p>

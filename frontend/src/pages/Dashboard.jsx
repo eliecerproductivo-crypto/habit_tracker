@@ -111,7 +111,7 @@ export default function Dashboard() {
   return (
     <div className="flex flex-col gap-6">
       <DateNavBar date={selectedDate} onChange={setSelectedDate} />
-
+ 
       {loading ? (
         <p className="text-sm text-ink-soft">Cargando…</p>
       ) : error ? (
