@@ -278,7 +278,7 @@ export default function Timer() {
         session_type: sessionToSave.session_type,
         notes: saveNotes.trim(),
         auto_mark_done: autoMarkDone && !!sessionToSave.habit_id,
-        mood: autoMarkDone && sessionToSave.habit_id && saveMood ? saveMood : null,
+        mood: saveMood || null,
         log_date: todayLocalISODate(),
       });
 
@@ -822,8 +822,8 @@ export default function Timer() {
               </label>
             )}
 
-            {/* Selector de estado de ánimo (solo si se marca como completado) */}
-            {sessionToSave.habit_id && autoMarkDone && (
+            {/* Selector de estado de ánimo — siempre visible */}
+            {(sessionToSave.habit_id ? autoMarkDone : true) && (
               <div className="mt-3">
                 <p className="text-xs font-semibold text-ink-soft mb-2">¿Cómo te sentiste?</p>
                 <div className="flex flex-wrap gap-2">
