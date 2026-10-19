@@ -6,10 +6,12 @@ import StatCard from "../components/StatCard";
 import WildcardWidget from "../components/WildcardWidget";
 import DateNavBar from "../components/DateNavBar";
 import MonthHeatmap from "../components/MonthHeatmap";
+import TodoWidget from "../components/TodoWidget";
 import { useHabitsContext } from "../context/HabitsContext";
 import { useDayLogs } from "../hooks/useDayLogs";
 import { useStats } from "../hooks/useStats";
 import { useWildcard } from "../hooks/useWildcard";
+import { useHabitWildcard } from "../hooks/useHabitWildcard";
 import { todayLocalISODate, toLocalISODate, habitOccursOnDate, weekDatesOf } from "../lib/schedule";
 
 export default function Dashboard() {
@@ -20,6 +22,7 @@ export default function Dashboard() {
   const loading = habitsLoading || logsLoading;
   const { summary, refresh: refreshStats } = useStats();
   const { wildcard, gained, checkMilestone, useWildcardForDate, refresh: refreshWildcard } = useWildcard();
+  const { status: habitWildcard, refresh: refreshHabitWildcard, useRest, undoRest } = useHabitWildcard();
 
   // Sincronizar logs y estadisticas al volver a Dashboard o recibir eventos de actualizacion
   useEffect(() => {
@@ -56,6 +59,30 @@ export default function Dashboard() {
     // Verifica si se alcanzó un nuevo hito de 15 días al marcar un hábito como hecho
     if (status === "done") checkMilestone();
     return res;
+  };
+
+  // Usar comodín de hábito (descanso) para un hábito concreto
+  const handleRest = async (habitId) => {
+    try {
+      await useRest(habitId);
+      refreshStats();
+      refreshHabitWildcard();
+    } finally {
+      // Siempre sincronizar logs, incluso si el servidor rechazó el uso,
+      // para que el estado visual no quede desincronizado
+      refreshLogs();
+    }
+  };
+
+  // Deshacer descanso de hoy para un hábito
+  const handleUndoRest = async (habitId) => {
+    try {
+      await undoRest(habitId);
+      refreshStats();
+      refreshHabitWildcard();
+    } finally {
+      refreshLogs();
+    }
   };
 
   // Excluir hábitos que no existían en la fecha seleccionada.
@@ -104,9 +131,18 @@ export default function Dashboard() {
   // Estado calculado para hoy en la actividad del año (instantáneo y reactivo)
   const isAllDoneToday = scheduledToday.length > 0 && scheduledToday.every((h) => {
     const s = logsByHabitId[h.id]?.status;
-    return s === "done" || s === "skipped";
+    return s === "done" || s === "skipped" || s === "rest";
   });
-  const todayStatus = scheduledToday.length === 0 ? "empty" : isAllDoneToday ? "complete" : "failed";
+  const isAllRestToday = scheduledToday.length > 0 && scheduledToday.every((h) => {
+    return logsByHabitId[h.id]?.status === "rest";
+  });
+  const todayStatus = scheduledToday.length === 0
+    ? "empty"
+    : isAllRestToday
+    ? "rest"
+    : isAllDoneToday
+    ? "complete"
+    : "failed";
 
   return (
     <div className="flex flex-col gap-6">
@@ -123,6 +159,9 @@ export default function Dashboard() {
             logsByHabitId={logsByHabitId}
             onSetStatus={handleSetStatus}
             date={selectedDate}
+            habitWildcard={habitWildcard}
+            onRest={handleRest}
+            onUndoRest={handleUndoRest}
           />
 
           <div className="grid grid-cols-3 gap-2">
@@ -152,6 +191,7 @@ export default function Dashboard() {
               wildcard={wildcard}
               currentStreak={summary ? summary.current_streak : 0}
               gained={gained}
+              habitWildcard={habitWildcard}
               onUse={async (date) => {
                 await useWildcardForDate(date);
                 refreshHabits();
@@ -165,6 +205,9 @@ export default function Dashboard() {
             <MonthHeatmap habits={activeHabits} todayStatus={todayStatus} />
           )}
 
+          {/* Widget de pendientes — solo visible en vista de hoy */}
+          {isToday && <TodoWidget />}
+
           <div>
             <h2 className="mb-3 text-sm font-semibold text-ink-soft">
               {isToday ? "Plan de hoy" : "Plan de ese día"}
@@ -175,6 +218,9 @@ export default function Dashboard() {
               weekLogsByHabitId={weekLogsByHabitId}
               onSetStatus={handleSetStatus}
               date={selectedDate}
+              habitWildcard={habitWildcard}
+              onRest={handleRest}
+              onUndoRest={handleUndoRest}
             />
           </div>
         </>

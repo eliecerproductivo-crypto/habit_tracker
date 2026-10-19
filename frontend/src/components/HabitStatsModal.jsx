@@ -99,6 +99,7 @@ function cellColor(day, isDark) {
   if (day.status === "done")          return isDark ? "#34D399" : "#0F9D74";
   if (day.status === "skipped")       return isDark ? "#F5A623" : "#C97A0E";
   if (day.status === "failed")        return isDark ? "#FB7185" : "#D6455D";
+  if (day.status === "rest")          return isDark ? "#A78BFA" : "#7C3AED";
   return isDark ? "#4A2030" : "#F5C6CE"; // programado sin log
 }
 
@@ -162,6 +163,7 @@ function Heatmap({ habit, logs }) {
         {[
           { label: "Completado",    color: isDark ? "#34D399" : "#0F9D74" },
           { label: "Saltado",       color: isDark ? "#F5A623" : "#C97A0E" },
+          { label: "Descanso",      color: isDark ? "#A78BFA" : "#7C3AED" },
           { label: "Sin registrar", color: isDark ? "#4A2030" : "#F5C6CE" },
           { label: "No programado", color: isDark ? "#1E2A3E" : "#E3E7F0" },
         ].map(({ label, color }) => (
@@ -195,6 +197,7 @@ const STATUS_META = {
   done:    { label: "Completado", cls: "bg-mint-soft text-mint" },
   skipped: { label: "Saltado",    cls: "bg-signal-soft text-signal" },
   failed:  { label: "Fallido",    cls: "bg-coral-soft text-coral" },
+  rest:    { label: "Descanso",   cls: "bg-violet-soft text-violet" },
 };
 
 function LogRow({ log }) {

@@ -21,14 +21,14 @@ def _get_owned_habit(db: Session, habit_id: int, user: models.User) -> models.Ha
 
 @router.get("", response_model=list[schemas.HabitOut])
 def list_habits(
-    db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)
+    active: bool | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
 ):
-    habits = (
-        db.query(models.Habit)
-        .filter(models.Habit.user_id == current_user.id)
-        .order_by(models.Habit.start_time.nulls_last())
-        .all()
-    )
+    query = db.query(models.Habit).filter(models.Habit.user_id == current_user.id)
+    if active is not None:
+        query = query.filter(models.Habit.is_active.is_(active))
+    habits = query.order_by(models.Habit.start_time.nulls_last()).all()
     if habits:
         habit_ids = [h.id for h in habits]
         logged_habit_ids = set(
@@ -119,13 +119,77 @@ def update_habit(
     return habit
 
 
+@router.put("/{habit_id}/archive", response_model=schemas.HabitOut)
+def archive_habit(
+    habit_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Archiva un hábito (is_active = False) sin borrar su historial de logs.
+    El hábito deja de aparecer en el plan diario y en las stats activas,
+    pero sus registros se preservan para contexto histórico.
+    """
+    habit = _get_owned_habit(db, habit_id, current_user)
+    habit.is_active = False
+    db.commit()
+    db.refresh(habit)
+    has_logs = (
+        db.query(models.HabitLog.id)
+        .filter(models.HabitLog.habit_id == habit_id)
+        .first() is not None
+    )
+    habit.has_logs = has_logs
+    return habit
+
+
+@router.put("/{habit_id}/restore", response_model=schemas.HabitOut)
+def restore_habit(
+    habit_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Restaura un hábito archivado (is_active = True).
+    Vuelve a aparecer en el plan diario desde hoy.
+    """
+    from datetime import date as date_type
+    habit = _get_owned_habit(db, habit_id, current_user)
+    if habit.is_active:
+        raise HTTPException(status_code=400, detail="El hábito ya está activo.")
+    habit.is_active = True
+    # Actualizar start_date a hoy para que no retroactivamente marque días
+    # pasados (desde que fue archivado) como incumplidos.
+    habit.start_date = date_type.today()
+    db.commit()
+    db.refresh(habit)
+    has_logs = (
+        db.query(models.HabitLog.id)
+        .filter(models.HabitLog.habit_id == habit_id)
+        .first() is not None
+    )
+    habit.has_logs = has_logs
+    return habit
+
+
 @router.delete("/{habit_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_habit(
     habit_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    """
+    Elimina permanentemente un hábito y todos sus logs.
+    Solo se puede eliminar si el hábito ya está archivado (is_active = False).
+    Esto fuerza al usuario a archivar primero, evitando borrados accidentales
+    de hábitos activos con historial.
+    """
     habit = _get_owned_habit(db, habit_id, current_user)
+    if habit.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Archiva el hábito antes de eliminarlo definitivamente.",
+        )
     db.delete(habit)
     db.commit()
     return None

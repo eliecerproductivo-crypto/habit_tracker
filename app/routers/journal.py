@@ -514,6 +514,29 @@ def chat(
         habits_part = ", ".join(f"{name}: {round(sec/3600, 1)}h" for name, sec in sorted_habits)
         timer_summary = f"Últimos 7 días: {total_hours}h de enfoque en total ({habits_part})."
 
+    # ── 5.7 Tareas pendientes de hoy (To-Do) ─────────────────────────────────
+    from datetime import date as _date
+    todos_today = (
+        db.query(models.TodoItem)
+        .filter(
+            models.TodoItem.user_id == current_user.id,
+            models.TodoItem.done.is_(False),
+            (models.TodoItem.due_date == today) | (models.TodoItem.due_date.is_(None)),
+        )
+        .order_by(models.TodoItem.due_date.nulls_last(), models.TodoItem.created_at.asc())
+        .limit(10)
+        .all()
+    )
+    todos_summary = None
+    if todos_today:
+        lines = []
+        for t in todos_today:
+            due_str = " [vence hoy]" if t.due_date == today else ""
+            pri_map = {1: " (prioridad baja)", 2: " (prioridad media)", 3: " (prioridad alta)"}
+            pri_str = pri_map.get(t.priority, "")
+            lines.append(f"  • {t.text}{due_str}{pri_str}")
+        todos_summary = "Tareas pendientes para hoy:\n" + "\n".join(lines)
+
     # ── 6. Estadísticas ───────────────────────────────────────────────────────
     from app.routers.stats import compute_user_stats
     user_stats = compute_user_stats(db, current_user)
@@ -532,6 +555,7 @@ def chat(
         recent_notes=recent_notes_lines,
         habit_notes=habit_notes_lines,
         timer_summary=timer_summary,
+        todos_summary=todos_summary,
         stats={
             "dias_en_app": days_in_app,
             "racha_actual": user_stats.current_streak,

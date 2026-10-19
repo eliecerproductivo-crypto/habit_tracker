@@ -93,16 +93,29 @@ const PRESETS = [
 export default function Timer() {
   const { habits, refresh: refreshHabits } = useHabitsContext();
 
+  // ── Restaurar estado desde sessionStorage al montar ─────────────────────
+  const _stored = (() => {
+    try {
+      const raw = sessionStorage.getItem("rutina_timer_state");
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  })();
+
   // Configuración del timer
-  const [selectedHabitId, setSelectedHabitId] = useState("");
-  const [targetMinutes, setTargetMinutes] = useState(25);
+  const [selectedHabitId, setSelectedHabitId] = useState(_stored?.selectedHabitId ?? "");
+  const [targetMinutes, setTargetMinutes] = useState(_stored?.targetMinutes ?? 25);
   const [customMinutes, setCustomMinutes] = useState("");
-  const [remainingSeconds, setRemainingSeconds] = useState(25 * 60);
+  const [remainingSeconds, setRemainingSeconds] = useState(
+    _stored?.remainingSeconds ?? (_stored?.targetMinutes ?? 25) * 60
+  );
+  // Si había una sesión en curso al recargar, marcamos como pausada (no corriendo)
   const [isRunning, setIsRunning] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
 
   // Registro de sesión en curso
-  const [sessionStartTime, setSessionStartTime] = useState(null);
+  const [sessionStartTime, setSessionStartTime] = useState(
+    _stored?.sessionStartTime ? new Date(_stored.sessionStartTime) : null
+  );
   const [pausedElapsedSeconds, setPausedElapsedSeconds] = useState(0);
 
   // Modal para guardar sesión terminada
@@ -123,6 +136,11 @@ export default function Timer() {
   const activeHabits = useMemo(() => {
     return (habits || []).filter((h) => h.is_active);
   }, [habits]);
+
+  // Bandera: si había sesión en curso al recargar, mostrar aviso una vez
+  const [showResumedBanner, setShowResumedBanner] = useState(
+    Boolean(_stored?.sessionStartTime && _stored?.remainingSeconds < (_stored?.targetMinutes ?? 25) * 60)
+  );
 
   // Hábito actualmente seleccionado
   const selectedHabit = useMemo(() => {
@@ -149,6 +167,22 @@ export default function Timer() {
   useEffect(() => {
     loadHistoryAndStats();
   }, []);
+
+  // ── Persistir estado del timer en sessionStorage ─────────────────────────
+  // Se ejecuta cada vez que cambia algo relevante del timer.
+  // Se limpia en handleReset y handleSaveSession para no restaurar sesiones ya guardadas.
+  useEffect(() => {
+    if (sessionStartTime || remainingSeconds !== targetMinutes * 60) {
+      try {
+        sessionStorage.setItem("rutina_timer_state", JSON.stringify({
+          targetMinutes,
+          remainingSeconds,
+          selectedHabitId,
+          sessionStartTime: sessionStartTime ? sessionStartTime.toISOString() : null,
+        }));
+      } catch { /* storage lleno o privado — ignorar */ }
+    }
+  }, [targetMinutes, remainingSeconds, selectedHabitId, sessionStartTime]);
 
   // Timer Tick Interval
   const timerRef = useRef(null);
@@ -222,6 +256,7 @@ export default function Timer() {
     setRemainingSeconds(targetMinutes * 60);
     setSessionStartTime(null);
     setPausedElapsedSeconds(0);
+    try { sessionStorage.removeItem("rutina_timer_state"); } catch { /* ignorar */ }
   };
 
   // Cambiar duración preset
@@ -291,6 +326,7 @@ export default function Timer() {
       setSessionToSave(null);
       setSaveNotes("");
       setSaveMood("");
+      try { sessionStorage.removeItem("rutina_timer_state"); } catch { /* ignorar */ }
       handleReset();
     } catch (err) {
       alert("Error al guardar la sesión: " + (err?.response?.data?.detail || err.message));
@@ -362,6 +398,19 @@ export default function Timer() {
       {/* ─── VISTA DEL RELOJ ─── */}
       {activeTab === "timer" && (
         <div className="mt-8 space-y-8">
+          {/* Banner de sesión restaurada */}
+          {showResumedBanner && (
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-signal/30 bg-signal-soft px-4 py-2.5 text-xs font-medium text-signal">
+              <span>⏸ Sesión pausada restaurada — pulsa ▶ para continuar.</span>
+              <button
+                onClick={() => setShowResumedBanner(false)}
+                className="shrink-0 text-signal/60 hover:text-signal transition-colors cursor-pointer"
+                aria-label="Cerrar aviso"
+              >
+                ✕
+              </button>
+            </div>
+          )}
           {/* Card Principal del Temporizador */}
           <div className="relative overflow-hidden rounded-2xl border border-line bg-panel p-6 shadow-sm md:p-10">
             {/* Selector de Hábito */}
@@ -875,6 +924,7 @@ export default function Timer() {
                   setSaveModalOpen(false);
                   setSessionToSave(null);
                   setSaveMood("");
+                  try { sessionStorage.removeItem("rutina_timer_state"); } catch { /* ignorar */ }
                   handleReset();
                 }}
                 disabled={isSaving}

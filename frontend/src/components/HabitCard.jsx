@@ -1,4 +1,4 @@
-import { Pencil, Trash2, BarChart2 } from "lucide-react";
+import { Pencil, Trash2, BarChart2, Archive } from "lucide-react";
 import { categoryMeta } from "../lib/categories";
 import { DAY_LABELS, formatTime, parseDays } from "../lib/schedule";
 
@@ -8,7 +8,15 @@ const PRIORITY_BADGES = {
   3: { label: "Alta", bg: "bg-coral-soft", text: "text-coral font-semibold" },
 };
 
-export default function HabitCard({ habit, onEdit, onDelete, onStats }) {
+export default function HabitCard({
+  habit,
+  onEdit,
+  onDelete,
+  onStats,
+  deleteLabel = "Eliminar",
+  deleteIcon: DeleteIcon = Trash2,
+  dimmed = false,
+}) {
   const meta = categoryMeta(habit.category);
   const Icon = meta.icon;
   const days = parseDays(habit.days_of_week);

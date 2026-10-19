@@ -15,6 +15,7 @@ function cellColor(status, isDark) {
   switch (status) {
     case "complete": return isDark ? "#34D399" : "#0F9D74";   // mint
     case "failed":   return isDark ? "#FB7185" : "#D6455D";   // coral
+    case "rest":     return isDark ? "#A78BFA" : "#7C3AED";   // violet — descanso
     case "empty":    return isDark ? "#1E2A3E" : "#E3E7F0";   // panel-alt
     default:         return isDark ? "#1E2A3E" : "#E3E7F0";
   }
@@ -29,6 +30,7 @@ function cellTitle(iso, status) {
   switch (status) {
     case "complete": return `${label} — ✅ completo`;
     case "failed":   return `${label} — ❌ incompleto`;
+    case "rest":     return `${label} — 🛌 día de descanso`;
     case "empty":    return `${label} — sin hábitos`;
     default:         return label;
   }
@@ -36,7 +38,7 @@ function cellTitle(iso, status) {
 
 // ── Componente ────────────────────────────────────────────────────────────────
 export default function MonthHeatmap({ habits, todayStatus }) {
-  const { days, loading } = useYearHeatmap(habits);
+  const { days, loading } = useYearHeatmap(habits, todayStatus);
   const scrollRef = useRef(null);
   const today     = todayLocalISODate();
   const isDark    = document.documentElement.classList.contains("dark");
@@ -234,6 +236,10 @@ export default function MonthHeatmap({ habits, todayStatus }) {
         <span className="flex items-center gap-1">
           <svg width={CELL} height={CELL}><rect width={CELL} height={CELL} rx={2} fill={cellColor("failed",  isDark)} /></svg>
           Incompleto
+        </span>
+        <span className="flex items-center gap-1">
+          <svg width={CELL} height={CELL}><rect width={CELL} height={CELL} rx={2} fill={cellColor("rest",    isDark)} /></svg>
+          Descanso
         </span>
         <span className="flex items-center gap-1">
           <svg width={CELL} height={CELL}><rect width={CELL} height={CELL} rx={2} fill={cellColor("complete",isDark)} /></svg>

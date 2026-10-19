@@ -152,7 +152,7 @@ def _day_status(
     day_logs = status_by_date.get(d, {})
     for h in scheduled:
         s = day_logs.get(h.id)
-        if s == "done" or s == "skipped":
+        if s in ("done", "skipped", "rest"):
             continue
         return False
     return True
@@ -189,7 +189,7 @@ def _weekly_times_week_status(
         s = status_by_date.get(d, {}).get(h.id)
         if s == "done":
             done_count += 1
-        elif s == "skipped":
+        elif s == "skipped" or s == "rest":
             skipped_count += 1
 
     if done_count >= target:
@@ -283,6 +283,16 @@ def compute_user_stats(db: Session, user: models.User) -> schemas.StatsSummary:
     else:
         cursor = today - timedelta(days=1)
 
+    # milestone_streak: igual que current_streak pero NO cuenta días donde
+    # todos los hábitos registrados son "rest" (descanso de hábito).
+    # Se usa para calcular el progreso hacia el siguiente comodín de día libre.
+    milestone_streak = 0
+
+    def _day_has_real_done(d: date_type) -> bool:
+        """True si el día tiene al menos un hábito marcado done o skipped (no solo rest)."""
+        day_logs = status_by_date.get(d, {})
+        return any(s in ("done", "skipped") for s in day_logs.values())
+
     for _ in range(MAX_LOOKBACK_DAYS):
         status = day_status_combined(cursor)
         if status is None:
@@ -290,6 +300,8 @@ def compute_user_stats(db: Session, user: models.User) -> schemas.StatsSummary:
             continue
         if status is True:
             current_streak += 1
+            if _day_has_real_done(cursor):
+                milestone_streak += 1
             cursor -= timedelta(days=1)
         else:
             break
@@ -383,6 +395,7 @@ def compute_user_stats(db: Session, user: models.User) -> schemas.StatsSummary:
         best_streak=best_streak,
         week_completion_rate=week_completion_rate,
         total_completed=total_completed,
+        milestone_streak=milestone_streak,
     )
 
 

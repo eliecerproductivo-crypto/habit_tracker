@@ -173,6 +173,15 @@ def _migrate(connection):
                 "ALTER TABLE user_profiles ADD COLUMN routine_summary VARCHAR(1000) DEFAULT NULL"
             ))
 
+    # ── habit_wildcard_uses: tabla nueva (create_all la crea si no existe) ──
+    # Solo añadimos el índice parcial en PostgreSQL si es necesario.
+    # En SQLite create_all ya gestiona la tabla completa.
+    # No se necesita migración manual adicional — la tabla es nueva.
+    # El unique constraint uq_hwc_user_habit_date puede causar problemas si
+    # habit_id es NULL (duplicados permitidos para hábitos eliminados).
+    # En PostgreSQL: el constraint UNIQUE ignora NULLs, por lo que es correcto.
+    # En SQLite: igual, NULLs no violan UNIQUE.
+
 
 def init_db():
     # Creates tables if they don't exist yet, then applies pending migrations.

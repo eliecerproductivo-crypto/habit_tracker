@@ -29,6 +29,9 @@ class User(Base):
     received_requests = relationship("Friendship", foreign_keys="Friendship.addressee_id", back_populates="addressee", cascade="all, delete-orphan")
     timer_sessions = relationship("TimerSession", back_populates="user", cascade="all, delete-orphan")
 
+    def __repr__(self):
+        return f"<User id={self.id} email={self.email!r}>"
+
 
 class PasswordResetToken(Base):
     __tablename__ = "password_reset_tokens"
@@ -41,6 +44,9 @@ class PasswordResetToken(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     user = relationship("User")
+
+    def __repr__(self):
+        return f"<PasswordResetToken id={self.id} user_id={self.user_id} used={self.used}>"
 
 
 class Habit(Base):
@@ -80,6 +86,9 @@ class Habit(Base):
     logs = relationship("HabitLog", back_populates="habit", cascade="all, delete-orphan")
     timer_sessions = relationship("TimerSession", back_populates="habit", cascade="all, delete-orphan")
 
+    def __repr__(self):
+        return f"<Habit id={self.id} name={self.name!r} user_id={self.user_id}>"
+
     @property
     def has_logs(self) -> bool:
         if "_has_logs" in self.__dict__:
@@ -108,6 +117,9 @@ class HabitLog(Base):
 
     habit = relationship("Habit", back_populates="logs")
 
+    def __repr__(self):
+        return f"<HabitLog id={self.id} habit_id={self.habit_id} date={self.date} status={self.status!r}>"
+
 
 class Friendship(Base):
     __tablename__ = "friendships"
@@ -122,6 +134,9 @@ class Friendship(Base):
     requester = relationship("User", foreign_keys=[requester_id], back_populates="sent_requests")
     addressee = relationship("User", foreign_keys=[addressee_id], back_populates="received_requests")
 
+    def __repr__(self):
+        return f"<Friendship id={self.id} requester={self.requester_id} addressee={self.addressee_id} status={self.status!r}>"
+
 
 class Category(Base):
     __tablename__ = "categories"
@@ -133,6 +148,9 @@ class Category(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     owner = relationship("User", foreign_keys=[user_id])
+
+    def __repr__(self):
+        return f"<Category id={self.id} name={self.name!r} user_id={self.user_id}>"
 
 
 class JournalEntry(Base):
@@ -148,6 +166,9 @@ class JournalEntry(Base):
 
     owner = relationship("User", foreign_keys=[user_id])
 
+    def __repr__(self):
+        return f"<JournalEntry id={self.id} user_id={self.user_id} date={self.entry_date}>"
+
 
 class JournalSummary(Base):
     __tablename__ = "journal_summaries"
@@ -161,6 +182,9 @@ class JournalSummary(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     owner = relationship("User", foreign_keys=[user_id])
+
+    def __repr__(self):
+        return f"<JournalSummary id={self.id} user_id={self.user_id} {self.date_from}–{self.date_to}>"
 
 
 class UserProfile(Base):
@@ -180,6 +204,33 @@ class UserProfile(Base):
                         onupdate=lambda: datetime.now(timezone.utc))
 
     owner = relationship("User", foreign_keys=[user_id])
+
+    def __repr__(self):
+        return f"<UserProfile id={self.id} user_id={self.user_id}>"
+
+
+class HabitWildcardUse(Base):
+    """
+    Registro de cada uso de comodín de hábito (descanso individual).
+    Una fila por (usuario, hábito, fecha). Si el hábito se elimina,
+    habit_id queda en NULL para preservar el conteo de cuota de la quincena (CL-03).
+    """
+    __tablename__ = "habit_wildcard_uses"
+    __table_args__ = (UniqueConstraint("user_id", "habit_id", "date", name="uq_hwc_user_habit_date"),)
+
+    id         = Column(Integer, primary_key=True, index=True)
+    user_id    = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    # SET NULL cuando se elimina el hábito — el uso sigue contando en la cuota
+    habit_id   = Column(Integer, ForeignKey("habits.id", ondelete="SET NULL"), nullable=True, index=True)
+    date       = Column(Date, nullable=False)
+    # Clave de quincena: "2026-10A" (días 1–15) o "2026-10B" (días 16–31)
+    quincena   = Column(String(8), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    owner = relationship("User", foreign_keys=[user_id])
+
+    def __repr__(self):
+        return f"<HabitWildcardUse id={self.id} user_id={self.user_id} habit_id={self.habit_id} date={self.date}>"
 
 
 class WildcardBalance(Base):
@@ -209,6 +260,9 @@ class WildcardBalance(Base):
 
     owner = relationship("User", foreign_keys=[user_id])
 
+    def __repr__(self):
+        return f"<WildcardBalance id={self.id} user_id={self.user_id} balance={self.balance}>"
+
 
 class UserInsights(Base):
     """
@@ -234,6 +288,9 @@ class UserInsights(Base):
 
     owner = relationship("User", foreign_keys=[user_id])
 
+    def __repr__(self):
+        return f"<UserInsights id={self.id} user_id={self.user_id}>"
+
 
 class TodoItem(Base):
     """
@@ -256,6 +313,9 @@ class TodoItem(Base):
 
     owner = relationship("User", foreign_keys=[user_id])
 
+    def __repr__(self):
+        return f"<TodoItem id={self.id} user_id={self.user_id} done={self.done} text={self.text[:30]!r}>"
+
 
 class TimerSession(Base):
     __tablename__ = "timer_sessions"
@@ -273,3 +333,6 @@ class TimerSession(Base):
 
     user = relationship("User", back_populates="timer_sessions")
     habit = relationship("Habit", back_populates="timer_sessions")
+
+    def __repr__(self):
+        return f"<TimerSession id={self.id} user_id={self.user_id} habit_id={self.habit_id} duration={self.duration_seconds}s>"

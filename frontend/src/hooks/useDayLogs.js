@@ -124,6 +124,31 @@ export function useDayLogs(date) {
     }
   };
 
+  const applyOptimisticLog = useCallback((habitId, status, extra = {}) => {
+    const optimistic = {
+      id: logsByHabitId[habitId]?.id ?? `temp_${Date.now()}`,
+      habit_id: habitId,
+      date: targetDate,
+      status,
+      logged_at: new Date().toISOString(),
+      ...extra,
+    };
+    setLogs((prev) => [...prev.filter((l) => l.habit_id !== habitId), optimistic]);
+    setWeekLogs((prev) => [
+      ...prev.filter(
+        (l) => !(l.habit_id === habitId && String(l.date).slice(0, 10) === targetDate)
+      ),
+      optimistic,
+    ]);
+  }, [logsByHabitId, targetDate]);
+
+  const removeLogOptimistic = useCallback((habitId) => {
+    setLogs((prev) => prev.filter((l) => l.habit_id !== habitId));
+    setWeekLogs((prev) => prev.filter(
+      (l) => !(l.habit_id === habitId && String(l.date).slice(0, 10) === targetDate)
+    ));
+  }, [targetDate]);
+
   return {
     logs,
     logsByHabitId,
@@ -133,6 +158,8 @@ export function useDayLogs(date) {
     error,
     refresh,
     setHabitStatus,
+    applyOptimisticLog,
+    removeLogOptimistic,
     toggleToday: (habitId, completed) =>
       setHabitStatus(habitId, completed ? "done" : null),
     date: targetDate,

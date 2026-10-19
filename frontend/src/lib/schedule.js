@@ -205,3 +205,59 @@ export function weekDatesOf(isoDate) {
   const monday = weekMondayOf(isoDate);
   return Array.from({ length: 7 }, (_, i) => addDays(monday, i));
 }
+
+/**
+ * Evaluates whether a habit can use a wildcard rest today according to business rules:
+ * 1. Global quota remaining > 0
+ * 2. Habit formation period >= 14 days
+ * 3. Not used consecutively (cannot have rested yesterday)
+ * 4. Not already completed (done/skipped) today
+ */
+export function getHabitRestEligibility(
+  habit,
+  habitWildcard,
+  logsByHabitId,
+  weekLogsByHabitId,
+  todayStr = todayLocalISODate()
+) {
+  if (!habit) return { canRest: false, reason: null, isActive: false };
+  const currentStatus = logsByHabitId?.[habit.id]?.status;
+  if (currentStatus === "rest") {
+    return { canRest: true, reason: null, isActive: true };
+  }
+  if (!habitWildcard || habitWildcard.quota_remaining <= 0) {
+    return { canRest: false, reason: "Agotaste tus descansos de esta quincena", isActive: false };
+  }
+  if (currentStatus === "done" || currentStatus === "skipped") {
+    return { canRest: false, reason: "Ya registraste este hábito hoy", isActive: false };
+  }
+
+  // Regla de formación: mínimo 14 días desde created_at
+  if (habit.created_at) {
+    const raw = habit.created_at;
+    const hasZone = raw.endsWith("Z") || /[+-]\d{2}:\d{2}$/.test(raw);
+    const createdDate = new Date(hasZone ? raw : raw + "Z");
+    if (!isNaN(createdDate.getTime())) {
+      const [y, m, d] = todayStr.split("-").map(Number);
+      const todayDate = new Date(y, m - 1, d);
+      const createdMidnight = new Date(createdDate.getFullYear(), createdDate.getMonth(), createdDate.getDate());
+      const diffDays = Math.floor((todayDate - createdMidnight) / (1000 * 60 * 60 * 24));
+      if (diffDays < 14) {
+        const daysLeft = 14 - diffDays;
+        return {
+          canRest: false,
+          reason: `Este hábito aún está en formación (${daysLeft} ${daysLeft === 1 ? "día restante" : "días restantes"})`,
+          isActive: false,
+        };
+      }
+    }
+  }
+
+  // Regla anti-consecutivo: no puede haber descansado ayer
+  const yesterday = addDays(todayStr, -1);
+  if (weekLogsByHabitId?.[habit.id]?.[yesterday]?.status === "rest") {
+    return { canRest: false, reason: "Este hábito ya descansó ayer", isActive: false };
+  }
+
+  return { canRest: true, reason: null, isActive: false };
+}
