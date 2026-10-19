@@ -3,7 +3,7 @@ import { Check, X, MinusCircle, ArrowRight, BedDouble } from "lucide-react";
 import DayRail from "./DayRail";
 import HabitMoodModal from "./HabitMoodModal";
 import { categoryMeta } from "../lib/categories";
-import { formatTime, getCurrentAndNext, formatDateLabel, todayLocalISODate, getHabitRestEligibility } from "../lib/schedule";
+import { formatTime, getCurrentAndNext, formatDateLabel, todayLocalISODate, getHabitRestEligibility, getHabitTimesForDate } from "../lib/schedule";
 import { useNow } from "../hooks/useNow";
 
 const STATUS_CONFIG = [
@@ -130,9 +130,14 @@ export default function CurrentFocusCard({
               ].join(" ")}>
                 {current.name}
               </h2>
-              <p className="font-mono text-xs text-ink-soft tabular">
-                {formatTime(current.start_time)} – {formatTime(current.end_time)}
-              </p>
+              {(() => {
+                const times = getHabitTimesForDate(current, now);
+                return times.start_time ? (
+                  <p className="font-mono text-xs text-ink-soft tabular">
+                    {formatTime(times.start_time)} – {formatTime(times.end_time)}
+                  </p>
+                ) : null;
+              })()}
             </div>
 
             {/* action buttons */}
@@ -219,7 +224,7 @@ export default function CurrentFocusCard({
             <span>
               Siguiente:{" "}
               <span className="font-medium text-ink-soft">{next.name}</span>{" "}
-              a las {formatTime(next.start_time)}
+              a las {formatTime(getHabitTimesForDate(next, now).start_time)}
             </span>
           </div>
         )}

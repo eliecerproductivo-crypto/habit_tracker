@@ -20,6 +20,9 @@ const EMPTY = {
   has_time: false,
   start_time: "08:00",
   end_time: "09:00",
+  has_weekend_schedule: false,
+  weekend_start_time: "09:00",
+  weekend_end_time: "10:00",
   duration_minutes: "",
   start_date: "",
   recurrence_type: "weekly",
@@ -179,6 +182,9 @@ export default function HabitForm({ initial, onSubmit, onCancel, submitLabel = "
       ...initial,
       priority: initial.priority ?? null,
       has_time: !!(initial.start_time),
+      has_weekend_schedule: Boolean(initial.has_weekend_schedule),
+      weekend_start_time: initial.weekend_start_time || initial.start_time || "09:00",
+      weekend_end_time: initial.weekend_end_time || initial.end_time || "10:00",
       duration_minutes: initial.duration_minutes ? String(initial.duration_minutes) : "",
       days_of_week: Array.isArray(initial.days_of_week)
         ? initial.days_of_week
@@ -204,6 +210,28 @@ export default function HabitForm({ initial, onSubmit, onCancel, submitLabel = "
     }));
   };
 
+  const toggleWeekendSchedule = () => {
+    const nextVal = !form.has_weekend_schedule;
+    setForm((f) => {
+      let nextDays = f.days_of_week;
+      if (nextVal && f.recurrence_type === "weekly") {
+        const hasSun = f.days_of_week.includes(0);
+        const hasSat = f.days_of_week.includes(6);
+        if (!hasSun || !hasSat) {
+          const setDays = new Set(f.days_of_week);
+          setDays.add(0);
+          setDays.add(6);
+          nextDays = Array.from(setDays).sort((a, b) => a - b);
+        }
+      }
+      return {
+        ...f,
+        has_weekend_schedule: nextVal,
+        days_of_week: nextDays,
+      };
+    });
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
@@ -223,11 +251,15 @@ export default function HabitForm({ initial, onSubmit, onCancel, submitLabel = "
     }
     setSaving(true);
     try {
+      const hasWeekend = Boolean(form.has_time && form.has_weekend_schedule);
       await onSubmit({
         ...form,
         priority: form.priority !== null && form.priority !== undefined ? Number(form.priority) : null,
         start_time: form.has_time ? form.start_time : null,
         end_time: form.has_time ? form.end_time : null,
+        has_weekend_schedule: hasWeekend,
+        weekend_start_time: hasWeekend ? (form.weekend_start_time || form.start_time) : null,
+        weekend_end_time: hasWeekend ? (form.weekend_end_time || form.end_time) : null,
         duration_minutes: !form.has_time && form.duration_minutes ? Number(form.duration_minutes) : null,
         days_of_week: form.recurrence_type === "weekly" ? form.days_of_week.join(",") : "0,1,2,3,4,5,6",
         recurrence_interval: form.recurrence_type === "interval" ? Number(form.recurrence_interval) : null,
@@ -327,18 +359,65 @@ export default function HabitForm({ initial, onSubmit, onCancel, submitLabel = "
           </button>
         </div>
         {form.has_time && (
-          <div className="mt-3 grid grid-cols-2 gap-3">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-ink-soft">Hora inicio</label>
-              <input type="time" className={inputClass} value={form.start_time}
-                onChange={(e) => set("start_time", e.target.value)} />
+          <>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-ink-soft">
+                  {form.has_weekend_schedule ? "Hora inicio (Lun–Vie)" : "Hora inicio"}
+                </label>
+                <input type="time" className={inputClass} value={form.start_time}
+                  onChange={(e) => set("start_time", e.target.value)} />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-ink-soft">
+                  {form.has_weekend_schedule ? "Hora fin (Lun–Vie)" : "Hora fin"}
+                </label>
+                <input type="time" className={inputClass} value={form.end_time}
+                  onChange={(e) => set("end_time", e.target.value)} />
+              </div>
             </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-ink-soft">Hora fin</label>
-              <input type="time" className={inputClass} value={form.end_time}
-                onChange={(e) => set("end_time", e.target.value)} />
+
+            <div className="mt-3 rounded-xl border border-line bg-panel-alt/50 p-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-medium text-ink">Diferente horario para fin de semana</p>
+                  <p className="text-[11px] text-ink-faint">Sábado y Domingo</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={toggleWeekendSchedule}
+                  className={[
+                    "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors",
+                    form.has_weekend_schedule ? "bg-signal" : "bg-panel-alt",
+                  ].join(" ")}
+                  role="switch"
+                  aria-checked={form.has_weekend_schedule}
+                >
+                  <span
+                    className={[
+                      "pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transition-transform",
+                      form.has_weekend_schedule ? "translate-x-4" : "translate-x-0",
+                    ].join(" ")}
+                  />
+                </button>
+              </div>
+
+              {form.has_weekend_schedule && (
+                <div className="mt-3 grid grid-cols-2 gap-3 pt-3 border-t border-line/60">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-ink-soft">Hora inicio (Sáb–Dom)</label>
+                    <input type="time" className={inputClass} value={form.weekend_start_time}
+                      onChange={(e) => set("weekend_start_time", e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-ink-soft">Hora fin (Sáb–Dom)</label>
+                    <input type="time" className={inputClass} value={form.weekend_end_time}
+                      onChange={(e) => set("weekend_end_time", e.target.value)} />
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
+          </>
         )}
         {!form.has_time && (
           <div className="mt-3 flex items-center gap-3">

@@ -65,6 +65,9 @@ class Habit(Base):
     # Stored as "HH:MM" 24h strings for simplicity across DB backends
     start_time = Column(String(5), nullable=True, default=None)
     end_time = Column(String(5), nullable=True, default=None)
+    has_weekend_schedule = Column(Boolean, default=False, nullable=False)
+    weekend_start_time = Column(String(5), nullable=True, default=None)
+    weekend_end_time = Column(String(5), nullable=True, default=None)
 
     is_active = Column(Boolean, default=True, nullable=False)
     start_date = Column(Date, nullable=True, default=None)

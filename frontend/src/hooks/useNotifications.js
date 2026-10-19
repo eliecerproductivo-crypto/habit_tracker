@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { habitOccursOnDate, toLocalISODate, toMinutes } from "../lib/schedule";
+import { habitOccursOnDate, toLocalISODate, toMinutes, getHabitTimesForDate } from "../lib/schedule";
 
 const STORAGE_KEY = "rutina_notif_minutes";
 const DEFAULT_MINUTES = 15;
@@ -98,12 +98,13 @@ export function useNotifications(habits) {
         if (habit.is_active === false) return;
         if (!habitOccursOnDate(habit, isoDate)) return;
 
-        const start = toMinutes(habit.start_time);
+        const times = getHabitTimesForDate(habit, now);
+        const start = toMinutes(times.start_time);
         if (start == null) return;
 
         const minutesLeft = start - nowMinutes;
         if (minutesLeft >= 0 && minutesLeft <= advanceMinutes) {
-          const key = `${habit.id}-${dateKey}-${habit.start_time}`;
+          const key = `${habit.id}-${dateKey}-${times.start_time}`;
           if (!notifiedRef.current.has(key)) {
             notifiedRef.current.add(key);
             fireNotification(habit, minutesLeft);

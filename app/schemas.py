@@ -42,6 +42,9 @@ class HabitBase(BaseModel):
     )
     start_time: Optional[str] = Field(default=None, pattern=TIME_RE)
     end_time: Optional[str] = Field(default=None, pattern=TIME_RE)
+    has_weekend_schedule: bool = False
+    weekend_start_time: Optional[str] = Field(default=None, pattern=TIME_RE)
+    weekend_end_time: Optional[str] = Field(default=None, pattern=TIME_RE)
     is_active: bool = True
     start_date: Optional[date] = None
     recurrence_type: str = Field(default="weekly", pattern="^(weekly|interval|monthly|weekly_times)$")

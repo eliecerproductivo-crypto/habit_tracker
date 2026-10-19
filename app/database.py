@@ -131,6 +131,19 @@ def _migrate(connection):
             connection.execute(text(
                 "ALTER TABLE habits ADD COLUMN priority INTEGER DEFAULT NULL"
             ))
+        if "has_weekend_schedule" not in habit_cols:
+            default_val = "0" if dialect == "sqlite" else "FALSE"
+            connection.execute(text(
+                f"ALTER TABLE habits ADD COLUMN has_weekend_schedule BOOLEAN NOT NULL DEFAULT {default_val}"
+            ))
+        if "weekend_start_time" not in habit_cols:
+            connection.execute(text(
+                "ALTER TABLE habits ADD COLUMN weekend_start_time VARCHAR(5) DEFAULT NULL"
+            ))
+        if "weekend_end_time" not in habit_cols:
+            connection.execute(text(
+                "ALTER TABLE habits ADD COLUMN weekend_end_time VARCHAR(5) DEFAULT NULL"
+            ))
 
     # ── categories: unique constraint (user_id, name) ─────────────────────────
     if "categories" in tables:

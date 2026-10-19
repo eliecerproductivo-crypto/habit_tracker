@@ -114,13 +114,42 @@ export function habitOccursOnDateRaw(habit, isoDate) {
   return habitOccursOnDate(habit, isoDate, null);
 }
 
+/**
+ * Returns the effective start_time and end_time for a habit on a given date.
+ * If the habit has weekend schedule enabled and the given date is Saturday or Sunday,
+ * the weekend times are returned.
+ */
+export function getHabitTimesForDate(habit, dateObjOrIso = new Date()) {
+  if (!habit) return { start_time: null, end_time: null };
+  let weekday;
+  if (typeof dateObjOrIso === "string") {
+    weekday = weekdayOfISODate(dateObjOrIso);
+  } else if (dateObjOrIso instanceof Date) {
+    weekday = dateObjOrIso.getDay();
+  } else {
+    weekday = new Date().getDay();
+  }
+  const isWeekend = weekday === 0 || weekday === 6;
+  if (isWeekend && habit.has_weekend_schedule && habit.weekend_start_time) {
+    return {
+      start_time: habit.weekend_start_time,
+      end_time: habit.weekend_end_time || null,
+    };
+  }
+  return {
+    start_time: habit.start_time || null,
+    end_time: habit.end_time || null,
+  };
+}
+
 export function habitStatusNow(habit, now = new Date()) {
   const isoDate = toLocalISODate(now);
   if (!habitOccursOnDate(habit, isoDate)) return "not-scheduled";
 
   const nowMinutes = now.getHours() * 60 + now.getMinutes();
-  const start = toMinutes(habit.start_time);
-  const end = toMinutes(habit.end_time);
+  const times = getHabitTimesForDate(habit, now);
+  const start = toMinutes(times.start_time);
+  const end = toMinutes(times.end_time);
   if (start == null || end == null) return "not-scheduled";
 
   if (end > start) {
@@ -137,11 +166,19 @@ export function getCurrentAndNext(habits, now = new Date()) {
   const scheduled = habits.filter((h) => h.is_active !== false);
   const active = scheduled.filter((h) => habitStatusNow(h, now) === "active");
 
-  active.sort((a, b) => toMinutes(b.start_time) - toMinutes(a.start_time));
+  active.sort((a, b) => {
+    const aTime = getHabitTimesForDate(a, now);
+    const bTime = getHabitTimesForDate(b, now);
+    return toMinutes(bTime.start_time) - toMinutes(aTime.start_time);
+  });
 
   const upcoming = scheduled
     .filter((h) => habitStatusNow(h, now) === "upcoming")
-    .sort((a, b) => toMinutes(a.start_time) - toMinutes(b.start_time));
+    .sort((a, b) => {
+      const aTime = getHabitTimesForDate(a, now);
+      const bTime = getHabitTimesForDate(b, now);
+      return toMinutes(aTime.start_time) - toMinutes(bTime.start_time);
+    });
 
   return {
     current: active[0] || null,

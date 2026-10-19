@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Check, X, MinusCircle, MessageSquare, BarChart2, ChevronDown, ChevronUp, BedDouble } from "lucide-react";
 import { categoryMeta } from "../lib/categories";
-import { formatTime, toMinutes, todayLocalISODate, habitOccursOnDate, weekDatesOf, getHabitRestEligibility } from "../lib/schedule";
+import { formatTime, toMinutes, todayLocalISODate, habitOccursOnDate, weekDatesOf, getHabitRestEligibility, getHabitTimesForDate } from "../lib/schedule";
 import HabitMoodModal, { getMoodInfo } from "./HabitMoodModal";
 import HabitStatsModal from "./HabitStatsModal";
 
@@ -65,8 +65,10 @@ export default function TodayChecklist({ habits, logsByHabitId = {}, weekLogsByH
       return habitOccursOnDate(h, resolvedDate, completedSet);
     })
     .sort((a, b) => {
-      const aMin = toMinutes(a.start_time);
-      const bMin = toMinutes(b.start_time);
+      const aTimes = getHabitTimesForDate(a, resolvedDate);
+      const bTimes = getHabitTimesForDate(b, resolvedDate);
+      const aMin = toMinutes(aTimes.start_time);
+      const bMin = toMinutes(bTimes.start_time);
       if (aMin == null && bMin == null) return 0;
       if (aMin == null) return 1;
       if (bMin == null) return -1;
@@ -182,13 +184,20 @@ export default function TodayChecklist({ habits, logsByHabitId = {}, weekLogsByH
               )}
             </div>
 
-            {habit.start_time ? (
-              <p className="font-mono text-xs text-ink-faint tabular">
-                {formatTime(habit.start_time)} – {formatTime(habit.end_time)}
-              </p>
-            ) : habit.duration_minutes ? (
-              <p className="text-xs text-ink-faint">{habit.duration_minutes} min</p>
-            ) : null}
+            {(() => {
+              const times = getHabitTimesForDate(habit, resolvedDate);
+              if (times.start_time) {
+                return (
+                  <p className="font-mono text-xs text-ink-faint tabular">
+                    {formatTime(times.start_time)} – {formatTime(times.end_time)}
+                  </p>
+                );
+              }
+              if (habit.duration_minutes) {
+                return <p className="text-xs text-ink-faint">{habit.duration_minutes} min</p>;
+              }
+              return null;
+            })()}
 
             {habit.recurrence_type === "weekly_times" && (() => {
               const target = habit.recurrence_times_per_week ?? 1;

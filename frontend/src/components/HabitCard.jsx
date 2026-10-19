@@ -71,12 +71,20 @@ export default function HabitCard({
       </div>
 
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 font-mono text-xs text-ink-soft tabular">
-        {habit.start_time
-          ? <span>{formatTime(habit.start_time)} – {formatTime(habit.end_time)}</span>
-          : habit.duration_minutes
-            ? <span className="font-sans text-ink-soft">{habit.duration_minutes} min</span>
-            : <span className="font-sans text-ink-faint">Sin hora fija</span>
-        }
+        {habit.start_time ? (
+          <span>
+            {formatTime(habit.start_time)} – {formatTime(habit.end_time)}
+            {habit.has_weekend_schedule && habit.weekend_start_time && (
+              <span className="ml-1.5 font-sans text-ink-faint">
+                (Finde: {formatTime(habit.weekend_start_time)}{habit.weekend_end_time ? ` – ${formatTime(habit.weekend_end_time)}` : ""})
+              </span>
+            )}
+          </span>
+        ) : habit.duration_minutes ? (
+          <span className="font-sans text-ink-soft">{habit.duration_minutes} min</span>
+        ) : (
+          <span className="font-sans text-ink-faint">Sin hora fija</span>
+        )}
         <span
           className="rounded-full px-2 py-0.5 font-sans font-medium"
           style={{ backgroundColor: `var(--${meta.token}-soft)`, color: `var(--${meta.token})` }}
