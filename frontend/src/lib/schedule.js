@@ -28,9 +28,9 @@ export function toMinutes(hhmm) {
 export function formatTime(hhmm) {
   if (!hhmm) return "";
   const [h, m] = hhmm.split(":").map(Number);
-  const period = h >= 12 ? "p. m." : "a. m.";
+  const period = h >= 12 ? "pm" : "am";
   const h12 = h % 12 === 0 ? 12 : h % 12;
-  return `${h12}:${String(m).padStart(2, "0")} ${period}`;
+  return `${h12}:${String(m).padStart(2, "0")}${period}`;
 }
 
 export function formatDuration(startMinutes, endMinutes) {
