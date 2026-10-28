@@ -99,14 +99,25 @@ export default function Dashboard() {
     return habitOccursOnDate(h, selectedDate, completedDatesInWeek);
   });
   const doneToday = scheduledToday.filter((h) => completedHabitIds.has(h.id)).length;
-  const pct = scheduledToday.length ? Math.round((doneToday / scheduledToday.length) * 100) : 0;
+  const skippedToday = scheduledToday.filter((h) => logsByHabitId[h.id]?.status === "skipped").length;
+  const activeScheduled = scheduledToday.length - skippedToday;
+  const pct = activeScheduled > 0
+    ? Math.round((doneToday / activeScheduled) * 100)
+    : scheduledToday.length > 0 && skippedToday === scheduledToday.length
+    ? 100
+    : 0;
 
-  // Estado calculado para hoy en la actividad del año (instantáneo y reactivo)
-  const isAllDoneToday = scheduledToday.length > 0 && scheduledToday.every((h) => {
+  const progressSublabel = skippedToday > 0
+    ? `${doneToday} / ${activeScheduled} bloques · ${skippedToday} omit.`
+    : `${doneToday} / ${scheduledToday.length} bloques`;
+
+  // Estado calculado para el día seleccionado en la actividad del año (instantáneo y reactivo)
+  const isAllDoneDay = scheduledToday.length > 0 && scheduledToday.every((h) => {
     const s = logsByHabitId[h.id]?.status;
     return s === "done" || s === "skipped";
   });
-  const todayStatus = scheduledToday.length === 0 ? "empty" : isAllDoneToday ? "complete" : "failed";
+  const currentDayStatus = scheduledToday.length === 0 ? "empty" : isAllDoneDay ? "complete" : "failed";
+  const todayStatus = isToday ? currentDayStatus : null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -129,8 +140,8 @@ export default function Dashboard() {
             <StatCard
               label={isToday ? "Hoy" : "Ese día"}
               value={`${pct}%`}
-              sublabel={`${doneToday} / ${scheduledToday.length} bloques`}
-              accent="signal"
+              sublabel={progressSublabel}
+              accent={pct === 100 ? "mint" : "signal"}
             />
             <StatCard
               label="Racha actual"
@@ -162,7 +173,12 @@ export default function Dashboard() {
 
           {/* Heatmap mensual — solo visible en vista de hoy */}
           {isToday && (
-            <MonthHeatmap habits={activeHabits} todayStatus={todayStatus} />
+            <MonthHeatmap
+              habits={activeHabits}
+              todayStatus={todayStatus}
+              selectedDate={selectedDate}
+              selectedDayStatus={currentDayStatus}
+            />
           )}
 
           <div>

@@ -201,9 +201,20 @@ export function useYearHeatmap(habits) {
     }
   }, [habitsKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { compute(); }, [compute]);
+  useEffect(() => {
+    compute();
+    const handleUpdate = () => {
+      compute();
+    };
+    window.addEventListener("logs-updated", handleUpdate);
+    window.addEventListener("habits-updated", handleUpdate);
+    return () => {
+      window.removeEventListener("logs-updated", handleUpdate);
+      window.removeEventListener("habits-updated", handleUpdate);
+    };
+  }, [compute]);
 
-  return { days, loading, error };
+  return { days, loading, error, refresh: compute };
 }
 
 function buildEmptyRange(startDate, todayDate) {

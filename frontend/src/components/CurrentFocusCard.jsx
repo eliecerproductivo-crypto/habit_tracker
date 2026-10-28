@@ -138,7 +138,7 @@ export default function CurrentFocusCard({ habits, logsByHabitId = {}, onSetStat
           showNow={isToday}
           completedHabitIds={new Set(
             Object.entries(logsByHabitId)
-              .filter(([, log]) => log.status === "done")
+              .filter(([, log]) => log.status === "done" || log.status === "skipped")
               .map(([id]) => Number(id))
           )}
         />

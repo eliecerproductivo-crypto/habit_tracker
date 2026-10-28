@@ -35,7 +35,7 @@ function cellTitle(iso, status) {
 }
 
 // ── Componente ────────────────────────────────────────────────────────────────
-export default function MonthHeatmap({ habits, todayStatus }) {
+export default function MonthHeatmap({ habits, todayStatus, selectedDate, selectedDayStatus }) {
   const { days, loading } = useYearHeatmap(habits);
   const scrollRef = useRef(null);
   const today     = todayLocalISODate();
@@ -70,10 +70,13 @@ export default function MonthHeatmap({ habits, todayStatus }) {
 
   if (days.length === 0) return null;
 
-  // Actualizar el día de hoy inmediatamente con el estado en vivo de Dashboard
+  // Actualizar el día de hoy o la fecha seleccionada inmediatamente con el estado en vivo de Dashboard
   const daysWithToday = days.map((d) => {
     if (d.iso === today && todayStatus) {
       return { ...d, status: todayStatus };
+    }
+    if (selectedDate && d.iso === selectedDate && selectedDayStatus) {
+      return { ...d, status: selectedDayStatus };
     }
     return d;
   });

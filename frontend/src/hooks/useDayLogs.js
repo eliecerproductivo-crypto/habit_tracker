@@ -70,6 +70,7 @@ export function useDayLogs(date) {
       ));
       try {
         await api.delete(`/logs/${existing.id}`);
+        window.dispatchEvent(new CustomEvent("logs-updated"));
       } catch (err) {
         // Revert on failure
         setLogs((prev) => [...prev, existing]);
@@ -115,6 +116,7 @@ export function useDayLogs(date) {
         ),
         res.data,
       ]);
+      window.dispatchEvent(new CustomEvent("logs-updated"));
       return res.data;
     } catch (err) {
       // Revert on failure
