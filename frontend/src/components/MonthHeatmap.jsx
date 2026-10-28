@@ -15,6 +15,7 @@ function cellColor(status, isDark) {
   switch (status) {
     case "complete": return isDark ? "#34D399" : "#0F9D74";   // mint
     case "failed":   return isDark ? "#FB7185" : "#D6455D";   // coral
+    case "rest":     return isDark ? "#A78BFA" : "#7C3AED";   // violet — descanso
     case "empty":    return isDark ? "#1E2A3E" : "#E3E7F0";   // panel-alt
     default:         return isDark ? "#1E2A3E" : "#E3E7F0";
   }
@@ -29,6 +30,7 @@ function cellTitle(iso, status) {
   switch (status) {
     case "complete": return `${label} — ✅ completo`;
     case "failed":   return `${label} — ❌ incompleto`;
+    case "rest":     return `${label} — 🛌 día de descanso`;
     case "empty":    return `${label} — sin hábitos`;
     default:         return label;
   }
@@ -36,7 +38,7 @@ function cellTitle(iso, status) {
 
 // ── Componente ────────────────────────────────────────────────────────────────
 export default function MonthHeatmap({ habits, todayStatus, selectedDate, selectedDayStatus }) {
-  const { days, loading } = useYearHeatmap(habits);
+  const { days, loading } = useYearHeatmap(habits, todayStatus);
   const scrollRef = useRef(null);
   const today     = todayLocalISODate();
   const isDark    = document.documentElement.classList.contains("dark");
@@ -53,7 +55,7 @@ export default function MonthHeatmap({ habits, todayStatus, selectedDate, select
 
   if (loading && days.length === 0) {
     return (
-      <div className="rounded-2xl border border-line bg-panel p-4 md:p-5 min-h-[175px] flex flex-col justify-between">
+      <div className="rounded-2xl border border-line bg-panel p-4 md:p-5 min-h-43.75 flex flex-col justify-between">
         <p className="text-xs text-ink-faint">Cargando actividad…</p>
         <div className="mt-3 flex gap-0.5 overflow-hidden opacity-30">
           {Array.from({ length: 52 }).map((_, i) => (
@@ -124,7 +126,7 @@ export default function MonthHeatmap({ habits, todayStatus, selectedDate, select
   const LABEL_W = 18;   // px reservados para etiquetas de días
 
   return (
-    <div className="rounded-2xl border border-line bg-panel p-4 md:p-5 min-h-[175px]">
+    <div className="rounded-2xl border border-line bg-panel p-4 md:p-5 min-h-43.75">
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <p className="text-xs font-semibold text-ink">Actividad del año</p>
@@ -237,6 +239,10 @@ export default function MonthHeatmap({ habits, todayStatus, selectedDate, select
         <span className="flex items-center gap-1">
           <svg width={CELL} height={CELL}><rect width={CELL} height={CELL} rx={2} fill={cellColor("failed",  isDark)} /></svg>
           Incompleto
+        </span>
+        <span className="flex items-center gap-1">
+          <svg width={CELL} height={CELL}><rect width={CELL} height={CELL} rx={2} fill={cellColor("rest",    isDark)} /></svg>
+          Descanso
         </span>
         <span className="flex items-center gap-1">
           <svg width={CELL} height={CELL}><rect width={CELL} height={CELL} rx={2} fill={cellColor("complete",isDark)} /></svg>

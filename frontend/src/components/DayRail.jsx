@@ -1,5 +1,5 @@
 import { categoryMeta } from "../lib/categories";
-import { toMinutes, formatTime, habitOccursOnDate, todayLocalISODate } from "../lib/schedule";
+import { toMinutes, formatTime, habitOccursOnDate, todayLocalISODate, getHabitTimesForDate } from "../lib/schedule";
 
 const DAY_MIN = 24 * 60;
 const VIEW_START = 5 * 60 + 30;  // 5:30 AM in minutes
@@ -27,9 +27,10 @@ function toViewPct(minutes) {
   return ((minutes - VIEW_START) / VIEW_RANGE) * 100;
 }
 
-function segmentsFor(habit) {
-  const start = toMinutes(habit.start_time);
-  const end = toMinutes(habit.end_time);
+function segmentsFor(habit, date) {
+  const times = getHabitTimesForDate(habit, date);
+  const start = toMinutes(times.start_time);
+  const end = toMinutes(times.end_time);
   if (start == null || end == null) return [];
   if (end > start) return [[start, end]];
   return [[start, DAY_MIN], [0, end]];
@@ -55,8 +56,9 @@ export default function DayRail({ habits, now, date, showNow = true, completedHa
   return (
     <div className="w-full select-none">
       <div className="relative h-3.5 w-full rounded-full bg-panel-alt">
-        {todays.map((habit) =>
-          segmentsFor(habit).flatMap(([start, end], i) => {
+        {todays.map((habit) => {
+          const habitTimes = getHabitTimesForDate(habit, resolvedDate);
+          return segmentsFor(habit, resolvedDate).flatMap(([start, end], i) => {
             const clipped = clipSegment(start, end);
             if (!clipped) return [];
             const [cs, ce] = clipped;
@@ -67,7 +69,7 @@ export default function DayRail({ habits, now, date, showNow = true, completedHa
             return (
               <div
                 key={`${habit.id}-${i}`}
-                title={`${habit.name} · ${formatTime(habit.start_time)}–${formatTime(habit.end_time)}`}
+                title={`${habit.name} · ${formatTime(habitTimes.start_time)}–${formatTime(habitTimes.end_time)}`}
                 className="absolute top-0 h-3.5 rounded-full"
                 style={{
                   left: `${left}%`,
@@ -77,8 +79,8 @@ export default function DayRail({ habits, now, date, showNow = true, completedHa
                 }}
               />
             );
-          })
-        )}
+          });
+        })}
 
         {nowVisible && (
           <div

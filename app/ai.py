@@ -310,11 +310,13 @@ def chat_with_context(
     recent_notes: list[str] | None = None,
     habit_notes: list[str] | None = None,
     timer_summary: str | None = None,
+    todos_summary: str | None = None,
     user_insights: dict | None = None,
 ) -> Optional[str]:
     """
     Responde al usuario usando perfil personal, hábitos, estadísticas,
-    sesiones de enfoque (timer), notas recientes, notas de hábitos y resúmenes del diario como contexto.
+    sesiones de enfoque (timer), tareas pendientes, notas recientes, notas de hábitos
+    y resúmenes del diario como contexto.
     """
     # ── Perfil ────────────────────────────────────────────────────────────────
     bio_block = f"\n\nQUIÉN SOY (perfil del usuario):\n{bio_summary}" if bio_summary else ""
@@ -345,6 +347,9 @@ def chat_with_context(
 
     # ── Tiempo de enfoque (Timer / Pomodoro) ───────────────────────────────────
     timer_block = f"\n\nTIEMPO DEDICADO Y ENFOQUE:\n{timer_summary}" if timer_summary else ""
+
+    # ── Tareas pendientes de hoy ───────────────────────────────────────────────
+    todos_block = f"\n\nTAREAS PENDIENTES PARA HOY:\n{todos_summary}" if todos_summary else ""
 
     # ── Estadísticas ──────────────────────────────────────────────────────────
     stats_block = ""

@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { Shuffle, AlertTriangle, CheckCircle, Info } from "lucide-react";
+import { Shuffle, AlertTriangle, CheckCircle, Info, BedDouble } from "lucide-react";
 import { todayLocalISODate } from "../lib/schedule";
 
-export default function WildcardWidget({ wildcard, currentStreak = 0, onUse, gained = false }) {
+export default function WildcardWidget({ wildcard, currentStreak = 0, onUse, gained = false, habitWildcard = null }) {
   const [using, setUsing]           = useState(false);
   const [useError, setUseError]     = useState("");
   const [useSuccess, setUseSuccess] = useState(false);
@@ -36,7 +36,7 @@ export default function WildcardWidget({ wildcard, currentStreak = 0, onUse, gai
   return (
     <div className="rounded-2xl border border-line bg-panel px-4 py-3 flex flex-col gap-2.5">
 
-      {/* ── Fila principal ── */}
+      {/* ── Fila principal — comodín de día libre ── */}
       <div className="flex items-center gap-3">
 
         {/* Cartas de saldo */}
@@ -131,6 +131,46 @@ export default function WildcardWidget({ wildcard, currentStreak = 0, onUse, gai
         <p className="text-[11px] text-coral">{useError}</p>
       )}
 
+      {/* ── Sección de descansos por quincena ── */}
+      {habitWildcard && (
+        <div className="border-t border-line pt-2.5 flex flex-col gap-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              <BedDouble size={13} className="text-violet shrink-0" />
+              <p className="text-xs font-semibold text-ink">
+                Descansos esta quincena
+              </p>
+            </div>
+            <span className={[
+              "text-xs font-mono font-bold tabular shrink-0",
+              habitWildcard.quota_remaining > 0 ? "text-violet" : "text-ink-faint",
+            ].join(" ")}>
+              {habitWildcard.quota_remaining}/{habitWildcard.quota_total}
+            </span>
+          </div>
+
+          {/* Barra de usos */}
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg border border-line">
+            <div
+              className="h-full rounded-full bg-violet/70 transition-all duration-500"
+              style={{ width: `${Math.round(((habitWildcard.quota_total - habitWildcard.quota_remaining) / Math.max(habitWildcard.quota_total, 1)) * 100)}%` }}
+            />
+          </div>
+
+          {/* Estado del segundo descanso */}
+          {!habitWildcard.second_earned && habitWildcard.quota_total < 2 && (
+            <p className="text-[10px] text-ink-faint leading-relaxed">
+              🎯 Cumple todos los hábitos en la primera mitad de la quincena para ganar un 2.° descanso.
+            </p>
+          )}
+          {habitWildcard.second_earned && habitWildcard.quota_total === 2 && (
+            <p className="text-[10px] text-violet font-semibold">
+              ✓ Ganaste el 2.° descanso por tu racha en la primera mitad.
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Ayuda desplegable mínima */}
       <details className="group">
         <summary className="cursor-pointer select-none flex items-center gap-1 text-[10px] text-ink-faint hover:text-ink transition-colors list-none">
@@ -141,7 +181,8 @@ export default function WildcardWidget({ wildcard, currentStreak = 0, onUse, gai
           <li>🃏 Ganas 1 cada <strong>15 días de racha</strong> (tope: 2).</li>
           <li>🛡️ Úsalo si no puedes completar tus hábitos — la racha se mantiene.</li>
           <li>🚫 No puedes usar dos días <strong>consecutivos</strong>.</li>
-          <li>📦 No expiran al cambiar de mes.</li>
+          <li>🛌 "Descansar" — usa 1 descanso de la quincena para un hábito. La racha se mantiene.</li>
+          <li>🎯 Cumple la primera mitad de la quincena sin fallar para ganar un 2.° descanso.</li>
         </ul>
       </details>
     </div>

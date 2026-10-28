@@ -45,9 +45,21 @@ export function HabitsProvider({ children }) {
     setHabits((h) => h.filter((x) => x.id !== id));
   };
 
+  const archiveHabit = async (id) => {
+    const res = await api.put(`/habits/${id}/archive`);
+    setHabits((h) => h.map((x) => (x.id === id ? res.data : x)));
+    return res.data;
+  };
+
+  const restoreHabit = async (id) => {
+    const res = await api.put(`/habits/${id}/restore`);
+    setHabits((h) => h.map((x) => (x.id === id ? res.data : x)));
+    return res.data;
+  };
+
   return (
     <HabitsContext.Provider
-      value={{ habits, loading, error, refresh, setHabits, createHabit, updateHabit, deleteHabit }}
+      value={{ habits, loading, error, refresh, setHabits, createHabit, updateHabit, deleteHabit, archiveHabit, restoreHabit }}
     >
       {children}
     </HabitsContext.Provider>

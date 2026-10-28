@@ -1,9 +1,15 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import api from "../api/client";
 import { habitOccursOnDate, todayLocalISODate, toLocalISODate } from "../lib/schedule";
 
+const CACHE_KEY_PREFIX = "rutina_heatmap_";
+
 /**
  * Carga los logs del año completo y calcula el estado de cada día.
+ * Los resultados se cachean en sessionStorage por (habitsKey + today) para
+ * evitar re-fetches en navegación. El caché se invalida cuando cambia habitsKey
+ * o cuando todayInvalidator cambia (señal de que los logs de hoy se modificaron).
+ *
  * Para weekly_times la evaluación es a nivel de SEMANA (lun-dom):
  *   - Semana terminada con cuota cumplida  → "complete"
  *   - Semana terminada sin cuota           → "failed"
@@ -28,7 +34,7 @@ function mondayOfWeek(isoDate) {
   return formatLocalDate(d);
 }
 
-export function useYearHeatmap(habits) {
+export function useYearHeatmap(habits, todayInvalidator = "") {
   const [days, setDays]       = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState(null);
@@ -37,8 +43,27 @@ export function useYearHeatmap(habits) {
     `${h.id}-${h.is_active}-${h.days_of_week}-${h.recurrence_type}-${h.recurrence_times_per_week}-${h.start_date}`
   ).join("|") || "";
 
+  // cacheKey cambia si los hábitos o el estado de hoy cambian → re-fetch automático
+  const today = todayLocalISODate();
+  const cacheKey = `${CACHE_KEY_PREFIX}${today}_${habitsKey}_${todayInvalidator}`;
+  const prevCacheKeyRef = useRef(null);
+
   const compute = useCallback(async () => {
-    const today = todayLocalISODate();
+    // Intentar leer del caché si la clave no cambió
+    if (prevCacheKeyRef.current === cacheKey) return;
+
+    try {
+      const cached = sessionStorage.getItem(cacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setDays(parsed);
+          prevCacheKeyRef.current = cacheKey;
+          return; // datos frescos desde caché, sin fetch
+        }
+      }
+    } catch { /* ignorar errores de storage */ }
+
     const todayDate = parseLocalDate(today);
 
     const startDate = new Date(todayDate);
@@ -47,7 +72,9 @@ export function useYearHeatmap(habits) {
     const dateFrom = formatLocalDate(startDate);
 
     if (!habits || habits.length === 0) {
-      setDays(buildEmptyRange(startDate, todayDate));
+      const emptyDays = buildEmptyRange(startDate, todayDate);
+      setDays(emptyDays);
+      prevCacheKeyRef.current = cacheKey;
       return;
     }
 
@@ -165,7 +192,12 @@ export function useYearHeatmap(habits) {
 
         const regularOk = !hasRegular || scheduledRegular.every((h) => {
           const s = dayLogs[h.id];
-          return s === "done" || s === "skipped";
+          return s === "done" || s === "skipped" || s === "rest";
+        });
+
+        // Si todos los hábitos del día son "rest" (ninguno es done/skipped) → estado "rest"
+        const allRest = hasRegular && scheduledRegular.length > 0 && scheduledRegular.every((h) => {
+          return dayLogs[h.id] === "rest";
         });
 
         let wtFailed = false;
@@ -178,13 +210,16 @@ export function useYearHeatmap(habits) {
 
         let status;
         if (!hasWt) {
-          status = regularOk ? "complete" : "failed";
+          if (!regularOk) status = "failed";
+          else if (allRest) status = "rest";
+          else status = "complete";
         } else if (!hasRegular) {
           if (wtFailed) status = "failed";
           else if (wtAllMet) status = "complete";
           else status = "empty";
         } else {
           if (!regularOk || wtFailed) status = "failed";
+          else if (allRest) status = "rest";
           else if (regularOk && wtAllMet) status = "complete";
           else status = regularOk ? "complete" : "failed";
         }
@@ -194,12 +229,21 @@ export function useYearHeatmap(habits) {
       }
 
       setDays(result);
+      prevCacheKeyRef.current = cacheKey;
+      // Guardar en caché para navegaciones futuras dentro de la misma sesión
+      try {
+        // Limpiar entradas antiguas del mismo prefijo antes de guardar
+        Object.keys(sessionStorage)
+          .filter((k) => k.startsWith(CACHE_KEY_PREFIX) && k !== cacheKey)
+          .forEach((k) => sessionStorage.removeItem(k));
+        sessionStorage.setItem(cacheKey, JSON.stringify(result));
+      } catch { /* storage lleno — ignorar */ }
     } catch (err) {
       setError(err?.response?.data?.detail || "Error al cargar el heatmap.");
     } finally {
       setLoading(false);
     }
-  }, [habitsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cacheKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     compute();

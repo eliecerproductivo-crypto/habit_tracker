@@ -344,6 +344,7 @@ def export_data(
             "Días",
             "Hora inicio",
             "Hora fin",
+            "Hora fin de semana",
             "Duración (min)",
             "Recurrencia",
             "Veces por semana",
@@ -367,6 +368,7 @@ def export_data(
                 ),
                 h.start_time or "",
                 h.end_time or "",
+                f"{h.weekend_start_time or ''} - {h.weekend_end_time or ''}".strip(" -") if h.has_weekend_schedule else "",
                 h.duration_minutes if h.duration_minutes is not None else "",
                 h.recurrence_type,
                 h.recurrence_times_per_week if h.recurrence_times_per_week is not None else "",
@@ -545,6 +547,29 @@ def export_data(
         ],
     )
 
+    # ── 8. pendientes.csv ──────────────────────────────────────────────────
+    todos = (
+        db.query(models.TodoItem)
+        .filter(models.TodoItem.user_id == uid)
+        .order_by(models.TodoItem.created_at.desc())
+        .all()
+    )
+    todos_csv = _make_csv(
+        ["ID", "Tarea", "Completada", "Fecha límite", "Prioridad", "Creada en", "Actualizada en"],
+        [
+            [
+                t.id,
+                t.text,
+                "Sí" if t.done else "No",
+                str(t.due_date) if t.due_date else "",
+                _PRIORITY_LABELS.get(t.priority, "") if t.priority else "",
+                t.created_at.strftime("%Y-%m-%d %H:%M") if t.created_at else "",
+                t.updated_at.strftime("%Y-%m-%d %H:%M") if t.updated_at else "",
+            ]
+            for t in todos
+        ],
+    )
+
     # ── Empaquetar en ZIP ───────────────────────────────────────────────────
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
@@ -555,6 +580,7 @@ def export_data(
         zf.writestr("resumenes_diario.csv", summaries_csv)
         zf.writestr("categorias.csv", categories_csv)
         zf.writestr("perfil.csv", profile_csv)
+        zf.writestr("pendientes.csv", todos_csv)
 
     return Response(
         content=zip_buf.getvalue(),

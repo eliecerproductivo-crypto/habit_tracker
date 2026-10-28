@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Check, X, MinusCircle, MessageSquare, BarChart2, ChevronDown, ChevronUp } from "lucide-react";
+import { Check, X, MinusCircle, MessageSquare, BarChart2, ChevronDown, ChevronUp, BedDouble } from "lucide-react";
 import { categoryMeta } from "../lib/categories";
-import { formatTime, toMinutes, todayLocalISODate, habitOccursOnDate, weekDatesOf } from "../lib/schedule";
+import { formatTime, toMinutes, todayLocalISODate, habitOccursOnDate, weekDatesOf, getHabitRestEligibility, getHabitTimesForDate } from "../lib/schedule";
 import HabitMoodModal, { getMoodInfo } from "./HabitMoodModal";
 import HabitStatsModal from "./HabitStatsModal";
 
@@ -24,17 +24,25 @@ const STATUS_CONFIG = {
     activeClass: "bg-coral text-white border-coral",
     hoverClass: "hover:border-coral hover:text-coral",
   },
+  rest: {
+    icon: BedDouble,
+    label: "Descansar",
+    activeClass: "bg-violet text-white border-violet",
+    hoverClass: "hover:border-violet hover:text-violet",
+  },
 };
 
-export default function TodayChecklist({ habits, logsByHabitId = {}, weekLogsByHabitId = {}, onSetStatus, date }) {
+export default function TodayChecklist({ habits, logsByHabitId = {}, weekLogsByHabitId = {}, onSetStatus, date, habitWildcard = null, onRest = null, onUndoRest = null }) {
   const resolvedDate = date || todayLocalISODate();
   const isFuture = resolvedDate > todayLocalISODate();
+  const isToday  = resolvedDate === todayLocalISODate();
 
   // Estado para el modal de estado de ánimo
   const [moodModalHabit, setMoodModalHabit] = useState(null);
   const [pendingStatus, setPendingStatus]   = useState("done");
   const [statsHabit, setStatsHabit]         = useState(null);
   const [doneExpanded, setDoneExpanded]     = useState(false);
+  const [restLoading, setRestLoading]       = useState({});  // { [habitId]: bool }
 
   // Mon–Sun dates of the resolved week (for weekly_times quota tracking)
   const weekDates = weekDatesOf(resolvedDate);
@@ -57,8 +65,10 @@ export default function TodayChecklist({ habits, logsByHabitId = {}, weekLogsByH
       return habitOccursOnDate(h, resolvedDate, completedSet);
     })
     .sort((a, b) => {
-      const aMin = toMinutes(a.start_time);
-      const bMin = toMinutes(b.start_time);
+      const aTimes = getHabitTimesForDate(a, resolvedDate);
+      const bTimes = getHabitTimesForDate(b, resolvedDate);
+      const aMin = toMinutes(aTimes.start_time);
+      const bMin = toMinutes(bTimes.start_time);
       if (aMin == null && bMin == null) return 0;
       if (aMin == null) return 1;
       if (bMin == null) return -1;
@@ -70,12 +80,35 @@ export default function TodayChecklist({ habits, logsByHabitId = {}, weekLogsByH
   const completed = todays.filter((h) => !!logsByHabitId[h.id]?.status);
 
   const handleButtonClick = (habit, statusKey, isActive) => {
+    if (statusKey === "rest") {
+      // El botón de descanso tiene su propio flujo — sin modal de ánimo
+      handleRestClick(habit, isActive);
+      return;
+    }
     if (isActive) {
       onSetStatus(habit.id, null);
     } else {
       onSetStatus(habit.id, statusKey);
       setPendingStatus(statusKey);
       setMoodModalHabit(habit);
+    }
+  };
+
+  const handleRestClick = async (habit, isActive) => {
+    setRestLoading((prev) => ({ ...prev, [habit.id]: true }));
+    try {
+      if (isActive) {
+        // deshacer descanso
+        if (onUndoRest) await onUndoRest(habit.id);
+      } else {
+        if (onRest) await onRest(habit.id);
+      }
+    } catch {
+      // El error se muestra desde el hook en WildcardWidget.
+      // onRest/onUndoRest en Dashboard ya hace refreshLogs en finally,
+      // así que el estado visual se sincroniza aunque falle.
+    } finally {
+      setRestLoading((prev) => ({ ...prev, [habit.id]: false }));
     }
   };
 
@@ -151,13 +184,20 @@ export default function TodayChecklist({ habits, logsByHabitId = {}, weekLogsByH
               )}
             </div>
 
-            {habit.start_time ? (
-              <p className="font-mono text-xs text-ink-faint tabular">
-                {formatTime(habit.start_time)} – {formatTime(habit.end_time)}
-              </p>
-            ) : habit.duration_minutes ? (
-              <p className="text-xs text-ink-faint">{habit.duration_minutes} min</p>
-            ) : null}
+            {(() => {
+              const times = getHabitTimesForDate(habit, resolvedDate);
+              if (times.start_time) {
+                return (
+                  <p className="font-mono text-xs text-ink-faint tabular">
+                    {formatTime(times.start_time)} – {formatTime(times.end_time)}
+                  </p>
+                );
+              }
+              if (habit.duration_minutes) {
+                return <p className="text-xs text-ink-faint">{habit.duration_minutes} min</p>;
+              }
+              return null;
+            })()}
 
             {habit.recurrence_type === "weekly_times" && (() => {
               const target = habit.recurrence_times_per_week ?? 1;
@@ -192,6 +232,48 @@ export default function TodayChecklist({ habits, logsByHabitId = {}, weekLogsByH
               {Object.entries(STATUS_CONFIG).map(([statusKey, cfg]) => {
                 const BtnIcon = cfg.icon;
                 const isActive = currentStatus === statusKey;
+
+                // El botón "Descansar" solo se muestra si es hoy
+                if (statusKey === "rest") {
+                  if (!isToday) return null;
+                  // Determinar disponibilidad precisa por hábito
+                  const { canRest, reason: restReason } = getHabitRestEligibility(
+                    habit,
+                    habitWildcard,
+                    logsByHabitId,
+                    weekLogsByHabitId,
+                    resolvedDate
+                  );
+                  const isLoading = restLoading[habit.id];
+                  const tooltipText = isActive
+                    ? "Deshacer descanso de hoy"
+                    : canRest
+                      ? `Descansar hoy (te quedan ${habitWildcard?.quota_remaining ?? 0} descansos esta quincena)`
+                      : (restReason || "No disponible");
+
+                  return (
+                    <button
+                      key={statusKey}
+                      onClick={() => !isLoading && handleButtonClick(habit, statusKey, isActive)}
+                      aria-label={tooltipText}
+                      title={tooltipText}
+                      disabled={!canRest && !isActive}
+                      className={[
+                        "flex h-7 w-7 items-center justify-center rounded-full border-2 transition-colors",
+                        isLoading
+                          ? "border-line text-ink-faint opacity-50 cursor-wait"
+                          : isActive
+                            ? `cursor-pointer ${cfg.activeClass}`
+                            : canRest
+                              ? `border-line text-transparent ${cfg.hoverClass} cursor-pointer`
+                              : "border-line text-ink-faint/30 opacity-40 cursor-not-allowed",
+                      ].join(" ")}
+                    >
+                      <BtnIcon size={13} strokeWidth={2.5} />
+                    </button>
+                  );
+                }
+
                 return (
                   <button
                     key={statusKey}
@@ -227,13 +309,26 @@ export default function TodayChecklist({ habits, logsByHabitId = {}, weekLogsByH
           </ul>
         )}
 
-        {/* Si todo está completado y no hay pendientes */}
-        {pending.length === 0 && completed.length > 0 && (
-          <div className="rounded-2xl border border-mint/30 bg-mint-soft px-5 py-4 text-center">
-            <p className="text-sm font-semibold text-mint">¡Todo listo por hoy! 🎉</p>
-            <p className="text-xs text-mint/70 mt-0.5">Completaste todos tus hábitos del día.</p>
-          </div>
-        )}
+        {/* Si todo está completado o en descanso y no hay pendientes */}
+        {pending.length === 0 && completed.length > 0 && (() => {
+          const allRest = todays.every((h) => logsByHabitId[h.id]?.status === "rest");
+          if (allRest) {
+            return (
+              <div className="rounded-2xl border border-violet/30 bg-violet-soft px-5 py-4 text-center">
+                <p className="text-sm font-semibold text-violet">Hoy descansas — la racha se mantiene 🛌</p>
+                <p className="text-xs text-violet/70 mt-0.5">Tus hábitos de hoy están cubiertos por descansos.</p>
+              </div>
+            );
+          }
+          const anyFailed = todays.some((h) => logsByHabitId[h.id]?.status === "failed");
+          if (anyFailed) return null;
+          return (
+            <div className="rounded-2xl border border-mint/30 bg-mint-soft px-5 py-4 text-center">
+              <p className="text-sm font-semibold text-mint">¡Todo listo por hoy! 🎉</p>
+              <p className="text-xs text-mint/70 mt-0.5">Completaste todos tus hábitos del día.</p>
+            </div>
+          );
+        })()}
 
         {/* ── Acordeón de completados ── */}
         {completed.length > 0 && (

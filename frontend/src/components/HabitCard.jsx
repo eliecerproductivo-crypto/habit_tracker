@@ -1,4 +1,4 @@
-import { Pencil, Trash2, BarChart2 } from "lucide-react";
+import { Pencil, Trash2, BarChart2, Archive } from "lucide-react";
 import { categoryMeta } from "../lib/categories";
 import { DAY_LABELS, formatTime, parseDays } from "../lib/schedule";
 
@@ -8,7 +8,15 @@ const PRIORITY_BADGES = {
   3: { label: "Alta", bg: "bg-coral-soft", text: "text-coral font-semibold" },
 };
 
-export default function HabitCard({ habit, onEdit, onDelete, onStats }) {
+export default function HabitCard({
+  habit,
+  onEdit,
+  onDelete,
+  onStats,
+  deleteLabel = "Eliminar",
+  deleteIcon: DeleteIcon = Trash2,
+  dimmed = false,
+}) {
   const meta = categoryMeta(habit.category);
   const Icon = meta.icon;
   const days = parseDays(habit.days_of_week);
@@ -63,12 +71,20 @@ export default function HabitCard({ habit, onEdit, onDelete, onStats }) {
       </div>
 
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 font-mono text-xs text-ink-soft tabular">
-        {habit.start_time
-          ? <span>{formatTime(habit.start_time)} – {formatTime(habit.end_time)}</span>
-          : habit.duration_minutes
-            ? <span className="font-sans text-ink-soft">{habit.duration_minutes} min</span>
-            : <span className="font-sans text-ink-faint">Sin hora fija</span>
-        }
+        {habit.start_time ? (
+          <span>
+            {formatTime(habit.start_time)} – {formatTime(habit.end_time)}
+            {habit.has_weekend_schedule && habit.weekend_start_time && (
+              <span className="ml-1.5 font-sans text-ink-faint">
+                (Finde: {formatTime(habit.weekend_start_time)}{habit.weekend_end_time ? ` – ${formatTime(habit.weekend_end_time)}` : ""})
+              </span>
+            )}
+          </span>
+        ) : habit.duration_minutes ? (
+          <span className="font-sans text-ink-soft">{habit.duration_minutes} min</span>
+        ) : (
+          <span className="font-sans text-ink-faint">Sin hora fija</span>
+        )}
         <span
           className="rounded-full px-2 py-0.5 font-sans font-medium"
           style={{ backgroundColor: `var(--${meta.token}-soft)`, color: `var(--${meta.token})` }}

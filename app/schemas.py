@@ -42,6 +42,9 @@ class HabitBase(BaseModel):
     )
     start_time: Optional[str] = Field(default=None, pattern=TIME_RE)
     end_time: Optional[str] = Field(default=None, pattern=TIME_RE)
+    has_weekend_schedule: bool = False
+    weekend_start_time: Optional[str] = Field(default=None, pattern=TIME_RE)
+    weekend_end_time: Optional[str] = Field(default=None, pattern=TIME_RE)
     is_active: bool = True
     start_date: Optional[date] = None
     recurrence_type: str = Field(default="weekly", pattern="^(weekly|interval|monthly|weekly_times)$")
@@ -95,7 +98,7 @@ class HabitOut(HabitBase):
 
 # ---------- Logs ----------
 
-LOG_STATUSES = {"done", "skipped", "failed"}
+LOG_STATUSES = {"done", "skipped", "failed", "rest"}
 
 
 class LogCreate(BaseModel):
@@ -133,6 +136,7 @@ class StatsSummary(BaseModel):
     best_streak: int
     week_completion_rate: int
     total_completed: int
+    milestone_streak: int = 0   # días reales (done/skipped) para el comodín de día libre
 
 
 class HabitStatsOut(BaseModel):
@@ -274,3 +278,54 @@ class WildcardStatus(BaseModel):
 
 class WildcardUseRequest(BaseModel):
     date: date                            # fecha para la que se activa el comodín
+
+
+# ---------- To-Do ----------
+
+class TodoCreate(BaseModel):
+    text: str = Field(min_length=1, max_length=500)
+    due_date: Optional[date] = None
+    priority: Optional[int] = Field(default=None, ge=1, le=3)
+
+
+class TodoUpdate(BaseModel):
+    text: Optional[str] = Field(default=None, min_length=1, max_length=500)
+    done: Optional[bool] = None
+    due_date: Optional[date] = None
+    priority: Optional[int] = Field(default=None, ge=1, le=3)
+
+
+class TodoOut(BaseModel):
+    id: int
+    text: str
+    done: bool
+    due_date: Optional[date] = None
+    priority: Optional[int] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ---------- Comodín de hábito (descanso individual) ----------
+
+class HabitWildcardStatus(BaseModel):
+    quincena: str                      # "2026-10A"
+    quota_total: int                   # 1 o 2 según si ganó el segundo
+    quota_used: int                    # usos en la quincena actual
+    quota_remaining: int               # quota_total - quota_used
+    second_earned: bool                # True si cumplió la primera mitad
+    # Información específica de un hábito (None si no se consultó uno concreto)
+    habit_can_rest: Optional[bool] = None
+    habit_rest_reason: Optional[str] = None   # motivo si no puede descansar
+
+
+class HabitWildcardUseRequest(BaseModel):
+    habit_id: int
+    date: date
+
+
+class HabitWildcardUseOut(BaseModel):
+    log: LogOut
+    status: HabitWildcardStatus

@@ -131,6 +131,19 @@ def _migrate(connection):
             connection.execute(text(
                 "ALTER TABLE habits ADD COLUMN priority INTEGER DEFAULT NULL"
             ))
+        if "has_weekend_schedule" not in habit_cols:
+            default_val = "0" if dialect == "sqlite" else "FALSE"
+            connection.execute(text(
+                f"ALTER TABLE habits ADD COLUMN has_weekend_schedule BOOLEAN NOT NULL DEFAULT {default_val}"
+            ))
+        if "weekend_start_time" not in habit_cols:
+            connection.execute(text(
+                "ALTER TABLE habits ADD COLUMN weekend_start_time VARCHAR(5) DEFAULT NULL"
+            ))
+        if "weekend_end_time" not in habit_cols:
+            connection.execute(text(
+                "ALTER TABLE habits ADD COLUMN weekend_end_time VARCHAR(5) DEFAULT NULL"
+            ))
 
     # ── categories: unique constraint (user_id, name) ─────────────────────────
     if "categories" in tables:
@@ -172,6 +185,15 @@ def _migrate(connection):
             connection.execute(text(
                 "ALTER TABLE user_profiles ADD COLUMN routine_summary VARCHAR(1000) DEFAULT NULL"
             ))
+
+    # ── habit_wildcard_uses: tabla nueva (create_all la crea si no existe) ──
+    # Solo añadimos el índice parcial en PostgreSQL si es necesario.
+    # En SQLite create_all ya gestiona la tabla completa.
+    # No se necesita migración manual adicional — la tabla es nueva.
+    # El unique constraint uq_hwc_user_habit_date puede causar problemas si
+    # habit_id es NULL (duplicados permitidos para hábitos eliminados).
+    # En PostgreSQL: el constraint UNIQUE ignora NULLs, por lo que es correcto.
+    # En SQLite: igual, NULLs no violan UNIQUE.
 
 
 def init_db():

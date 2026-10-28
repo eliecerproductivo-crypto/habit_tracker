@@ -1,7 +1,9 @@
-import { Check, X, MinusCircle, ArrowRight } from "lucide-react";
+import { useState } from "react";
+import { Check, X, MinusCircle, ArrowRight, BedDouble } from "lucide-react";
 import DayRail from "./DayRail";
+import HabitMoodModal from "./HabitMoodModal";
 import { categoryMeta } from "../lib/categories";
-import { formatTime, getCurrentAndNext, formatDateLabel, todayLocalISODate } from "../lib/schedule";
+import { formatTime, getCurrentAndNext, formatDateLabel, todayLocalISODate, getHabitRestEligibility, getHabitTimesForDate } from "../lib/schedule";
 import { useNow } from "../hooks/useNow";
 
 const STATUS_CONFIG = [
@@ -26,11 +28,64 @@ const STATUS_CONFIG = [
     activeClass: "bg-coral text-white border-coral",
     idleClass: "border-line text-ink-faint hover:border-coral hover:text-coral",
   },
+  {
+    key: "rest",
+    label: "Descansar",
+    icon: BedDouble,
+    activeClass: "bg-violet text-white border-violet",
+    idleClass: "border-line text-ink-faint hover:border-violet hover:text-violet",
+  },
 ];
 
-export default function CurrentFocusCard({ habits, logsByHabitId = {}, onSetStatus, date }) {
+export default function CurrentFocusCard({
+  habits,
+  logsByHabitId = {},
+  weekLogsByHabitId = {},
+  onSetStatus,
+  date,
+  habitWildcard = null,
+  onRest = null,
+  onUndoRest = null,
+}) {
   const now = useNow();
   const isToday = !date || date === todayLocalISODate();
+
+  // Estado para el modal de ánimo/energía
+  const [moodModalHabit, setMoodModalHabit] = useState(null);
+  const [pendingStatus, setPendingStatus]   = useState("done");
+  const [restLoading, setRestLoading]       = useState(false);
+
+  const handleStatusClick = async (habit, statusKey, isActive) => {
+    if (statusKey === "rest") {
+      setRestLoading(true);
+      try {
+        if (isActive) {
+          if (onUndoRest) await onUndoRest(habit.id);
+        } else {
+          if (onRest) await onRest(habit.id);
+        }
+      } catch {
+        // silent
+      } finally {
+        setRestLoading(false);
+      }
+      return;
+    }
+    if (isActive) {
+      onSetStatus(habit.id, null);
+    } else {
+      onSetStatus(habit.id, statusKey);
+      setPendingStatus(statusKey);
+      setMoodModalHabit(habit);
+    }
+  };
+
+  const handleSaveMood = (data) => {
+    if (moodModalHabit) {
+      onSetStatus(moodModalHabit.id, pendingStatus, data);
+    }
+    setMoodModalHabit(null);
+  };
   const { current, next } = isToday ? getCurrentAndNext(habits, now) : { current: null, next: null };
 
   const clock = now.toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
@@ -75,20 +130,65 @@ export default function CurrentFocusCard({ habits, logsByHabitId = {}, onSetStat
               ].join(" ")}>
                 {current.name}
               </h2>
-              <p className="font-mono text-xs text-ink-soft tabular">
-                {formatTime(current.start_time)} – {formatTime(current.end_time)}
-              </p>
+              {(() => {
+                const times = getHabitTimesForDate(current, now);
+                return times.start_time ? (
+                  <p className="font-mono text-xs text-ink-soft tabular">
+                    {formatTime(times.start_time)} – {formatTime(times.end_time)}
+                  </p>
+                ) : null;
+              })()}
             </div>
 
-            {/* 3-state action buttons */}
+            {/* action buttons */}
             <div className="flex flex-wrap gap-1.5">
               {STATUS_CONFIG.map(({ key, label, icon: BtnIcon, activeClass, idleClass }) => {
                 const isActive = currentStatus === key;
+
+                // "Descansar" — manejo especial
+                if (key === "rest") {
+                  if (!isToday) return null;
+                  const { canRest, reason: restReason } = getHabitRestEligibility(
+                    current,
+                    habitWildcard,
+                    logsByHabitId,
+                    weekLogsByHabitId,
+                    todayLocalISODate()
+                  );
+                  const tooltipText = isActive
+                    ? "Deshacer descanso de hoy"
+                    : canRest
+                      ? `Descansar hoy (${habitWildcard?.quota_remaining ?? 0} restantes)`
+                      : (restReason || "No disponible");
+
+                  return (
+                    <button
+                      key={key}
+                      disabled={(!canRest && !isActive) || restLoading}
+                      onClick={() => isToday && handleStatusClick(current, key, isActive)}
+                      title={tooltipText}
+                      className={[
+                        "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors",
+                        restLoading
+                          ? "cursor-wait border-line text-ink-faint opacity-50"
+                          : isActive
+                            ? `cursor-pointer ${activeClass}`
+                            : canRest
+                              ? `cursor-pointer ${idleClass}`
+                              : "cursor-not-allowed border-line text-ink-faint opacity-30",
+                      ].join(" ")}
+                    >
+                      <BtnIcon size={13} strokeWidth={2.5} />
+                      {label}
+                    </button>
+                  );
+                }
+
                 return (
                   <button
                     key={key}
                     disabled={!isToday}
-                    onClick={() => isToday && onSetStatus(current.id, isActive ? null : key)}
+                    onClick={() => isToday && handleStatusClick(current, key, isActive)}
                     className={[
                       "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors",
                       isToday
@@ -124,7 +224,7 @@ export default function CurrentFocusCard({ habits, logsByHabitId = {}, onSetStat
             <span>
               Siguiente:{" "}
               <span className="font-medium text-ink-soft">{next.name}</span>{" "}
-              a las {formatTime(next.start_time)}
+              a las {formatTime(getHabitTimesForDate(next, now).start_time)}
             </span>
           </div>
         )}
@@ -143,6 +243,19 @@ export default function CurrentFocusCard({ habits, logsByHabitId = {}, onSetStat
           )}
         />
       </div>
+
+      {/* Modal de ánimo/energía tras completar desde el bloque actual */}
+      {moodModalHabit && (
+        <HabitMoodModal
+          isOpen={Boolean(moodModalHabit)}
+          habit={moodModalHabit}
+          status={pendingStatus}
+          initialMood={logsByHabitId[moodModalHabit.id]?.mood || null}
+          initialNote={logsByHabitId[moodModalHabit.id]?.note || ""}
+          onSave={handleSaveMood}
+          onClose={() => setMoodModalHabit(null)}
+        />
+      )}
     </section>
   );
 }

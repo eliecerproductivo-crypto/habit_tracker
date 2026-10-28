@@ -28,9 +28,9 @@ export function toMinutes(hhmm) {
 export function formatTime(hhmm) {
   if (!hhmm) return "";
   const [h, m] = hhmm.split(":").map(Number);
-  const period = h >= 12 ? "p. m." : "a. m.";
+  const period = h >= 12 ? "pm" : "am";
   const h12 = h % 12 === 0 ? 12 : h % 12;
-  return `${h12}:${String(m).padStart(2, "0")} ${period}`;
+  return `${h12}:${String(m).padStart(2, "0")}${period}`;
 }
 
 export function formatDuration(startMinutes, endMinutes) {
@@ -114,13 +114,42 @@ export function habitOccursOnDateRaw(habit, isoDate) {
   return habitOccursOnDate(habit, isoDate, null);
 }
 
+/**
+ * Returns the effective start_time and end_time for a habit on a given date.
+ * If the habit has weekend schedule enabled and the given date is Saturday or Sunday,
+ * the weekend times are returned.
+ */
+export function getHabitTimesForDate(habit, dateObjOrIso = new Date()) {
+  if (!habit) return { start_time: null, end_time: null };
+  let weekday;
+  if (typeof dateObjOrIso === "string") {
+    weekday = weekdayOfISODate(dateObjOrIso);
+  } else if (dateObjOrIso instanceof Date) {
+    weekday = dateObjOrIso.getDay();
+  } else {
+    weekday = new Date().getDay();
+  }
+  const isWeekend = weekday === 0 || weekday === 6;
+  if (isWeekend && habit.has_weekend_schedule && habit.weekend_start_time) {
+    return {
+      start_time: habit.weekend_start_time,
+      end_time: habit.weekend_end_time || null,
+    };
+  }
+  return {
+    start_time: habit.start_time || null,
+    end_time: habit.end_time || null,
+  };
+}
+
 export function habitStatusNow(habit, now = new Date()) {
   const isoDate = toLocalISODate(now);
   if (!habitOccursOnDate(habit, isoDate)) return "not-scheduled";
 
   const nowMinutes = now.getHours() * 60 + now.getMinutes();
-  const start = toMinutes(habit.start_time);
-  const end = toMinutes(habit.end_time);
+  const times = getHabitTimesForDate(habit, now);
+  const start = toMinutes(times.start_time);
+  const end = toMinutes(times.end_time);
   if (start == null || end == null) return "not-scheduled";
 
   if (end > start) {
@@ -137,11 +166,19 @@ export function getCurrentAndNext(habits, now = new Date()) {
   const scheduled = habits.filter((h) => h.is_active !== false);
   const active = scheduled.filter((h) => habitStatusNow(h, now) === "active");
 
-  active.sort((a, b) => toMinutes(b.start_time) - toMinutes(a.start_time));
+  active.sort((a, b) => {
+    const aTime = getHabitTimesForDate(a, now);
+    const bTime = getHabitTimesForDate(b, now);
+    return toMinutes(bTime.start_time) - toMinutes(aTime.start_time);
+  });
 
   const upcoming = scheduled
     .filter((h) => habitStatusNow(h, now) === "upcoming")
-    .sort((a, b) => toMinutes(a.start_time) - toMinutes(b.start_time));
+    .sort((a, b) => {
+      const aTime = getHabitTimesForDate(a, now);
+      const bTime = getHabitTimesForDate(b, now);
+      return toMinutes(aTime.start_time) - toMinutes(bTime.start_time);
+    });
 
   return {
     current: active[0] || null,
@@ -204,4 +241,60 @@ export function weekMondayOf(isoDate) {
 export function weekDatesOf(isoDate) {
   const monday = weekMondayOf(isoDate);
   return Array.from({ length: 7 }, (_, i) => addDays(monday, i));
+}
+
+/**
+ * Evaluates whether a habit can use a wildcard rest today according to business rules:
+ * 1. Global quota remaining > 0
+ * 2. Habit formation period >= 14 days
+ * 3. Not used consecutively (cannot have rested yesterday)
+ * 4. Not already completed (done/skipped) today
+ */
+export function getHabitRestEligibility(
+  habit,
+  habitWildcard,
+  logsByHabitId,
+  weekLogsByHabitId,
+  todayStr = todayLocalISODate()
+) {
+  if (!habit) return { canRest: false, reason: null, isActive: false };
+  const currentStatus = logsByHabitId?.[habit.id]?.status;
+  if (currentStatus === "rest") {
+    return { canRest: true, reason: null, isActive: true };
+  }
+  if (!habitWildcard || habitWildcard.quota_remaining <= 0) {
+    return { canRest: false, reason: "Agotaste tus descansos de esta quincena", isActive: false };
+  }
+  if (currentStatus === "done" || currentStatus === "skipped") {
+    return { canRest: false, reason: "Ya registraste este hábito hoy", isActive: false };
+  }
+
+  // Regla de formación: mínimo 14 días desde created_at
+  if (habit.created_at) {
+    const raw = habit.created_at;
+    const hasZone = raw.endsWith("Z") || /[+-]\d{2}:\d{2}$/.test(raw);
+    const createdDate = new Date(hasZone ? raw : raw + "Z");
+    if (!isNaN(createdDate.getTime())) {
+      const [y, m, d] = todayStr.split("-").map(Number);
+      const todayDate = new Date(y, m - 1, d);
+      const createdMidnight = new Date(createdDate.getFullYear(), createdDate.getMonth(), createdDate.getDate());
+      const diffDays = Math.floor((todayDate - createdMidnight) / (1000 * 60 * 60 * 24));
+      if (diffDays < 14) {
+        const daysLeft = 14 - diffDays;
+        return {
+          canRest: false,
+          reason: `Este hábito aún está en formación (${daysLeft} ${daysLeft === 1 ? "día restante" : "días restantes"})`,
+          isActive: false,
+        };
+      }
+    }
+  }
+
+  // Regla anti-consecutivo: no puede haber descansado ayer
+  const yesterday = addDays(todayStr, -1);
+  if (weekLogsByHabitId?.[habit.id]?.[yesterday]?.status === "rest") {
+    return { canRest: false, reason: "Este hábito ya descansó ayer", isActive: false };
+  }
+
+  return { canRest: true, reason: null, isActive: false };
 }

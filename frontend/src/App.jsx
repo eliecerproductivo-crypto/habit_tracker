@@ -16,6 +16,7 @@ import Journal from "./pages/Journal";
 import Coach from "./pages/Coach";
 import Profile from "./pages/Profile";
 import Timer from "./pages/Timer";
+import Todos from "./pages/Todos";
 
 function FullScreenLoader() {
   return (
@@ -40,6 +41,7 @@ const PROTECTED_PAGES = [
   { path: "/coach",        Page: Coach },
   { path: "/perfil-ia",    Page: Profile },
   { path: "/timer",        Page: Timer },
+  { path: "/pendientes",   Page: Todos },
 ];
 
 function ProtectedApp() {

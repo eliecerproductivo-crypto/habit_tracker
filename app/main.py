@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import init_db
-from app.routers import auth, habits, logs, stats, friends, categories, journal, profile, timer, wildcards
+from app.routers import auth, habits, logs, stats, friends, categories, journal, profile, timer, wildcards, todos, habit_wildcards
 
 app = FastAPI(title="Rutina API", version="1.0.0")
 
@@ -58,4 +58,6 @@ app.include_router(journal.router)
 app.include_router(profile.router)
 app.include_router(timer.router)
 app.include_router(wildcards.router)
+app.include_router(todos.router)
+app.include_router(habit_wildcards.router)
 
